@@ -8,6 +8,23 @@ type DOMNode struct {
 	Children      []DOMNode              `json:"children,omitempty"`
 }
 
+// DOMGetBackendNodeID gets the DOMBackendNodeID for a given DOMNodeID, it is
+// effectively a stripped-down version of DOMDescribeNode.
+type DOMGetBackendNodeID struct {
+	// NodeID (optional) Identifier of the node.
+	NodeID proto.DOMNodeID `json:"nodeId,omitempty"`
+}
+
+func (DOMGetBackendNodeID) ProtoReq() string { return "DOM.describeNode" }
+
+func (DOMGetBackendNodeID) Call(c proto.Client) (out *DOMGetBackendNodeIDResult, err error) { return }
+
+type DOMGetBackendNodeIDResult struct {
+	Node struct {
+		BackendNodeID proto.DOMBackendNodeID `json:"backendNodeId"`
+	} `json:"node"`
+}
+
 // DOMDescribeNode Describes node given its id, does not require domain to be
 // enabled. Does not start tracking any objects, can be used for automation.
 type DOMDescribeNode struct {
@@ -31,9 +48,9 @@ type DOMDescribeNode struct {
 
 func (DOMDescribeNode) ProtoReq() string { return "DOM.describeNode" }
 
-func (DOMDescribeNode) Call(c proto.Client) (out *cdpDOMDescribeNodeResult, err error) { return }
+func (DOMDescribeNode) Call(c proto.Client) (out *DOMDescribeNodeResult, err error) { return }
 
-type cdpDOMDescribeNodeResult struct {
+type DOMDescribeNodeResult struct {
 	Node DOMNode `json:"node"`
 }
 
