@@ -4,9 +4,7 @@ import (
 	"ax-distiller/internal/chrome/cdp"
 	"ax-distiller/internal/chrome/fastclient"
 	"context"
-	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 
 	"github.com/go-rod/rod"
@@ -15,47 +13,22 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 )
 
-func NewTestBrowser() (browser *rod.Browser, err error) {
-	dataTemp := "./data/chrome-data"
+func NewBrowser(chromeBin string) (browser *rod.Browser, err error) {
+	dataTemp := "/tmp/ax-distiller/chrome-data"
 	err = os.RemoveAll(dataTemp)
 	if err != nil {
 		return
 	}
-	err = os.Mkdir(dataTemp, 0777)
-	if err != nil {
-		return
-	}
-	chromedir, err := filepath.Abs("./data/chrome-ext")
+	err = os.MkdirAll(dataTemp, 0700)
 	if err != nil {
 		return
 	}
 
-	launch := launcher.New().Bin(filepath.Join(chromedir, "usr", "bin", "thorium")).
-		Env(
-			"APPIMAGELAUNCHER_DISABLE=1",
-			fmt.Sprintf(
-				`LD_LIBRARY_PATH=%s:%s`,
-				filepath.Join(chromedir, "usr", "lib"),
-				os.Getenv("LD_LIBRARY_PATH"),
-			),
-		).
+	launch := launcher.New().Bin(chromeBin).
 		UserDataDir(dataTemp).
 		Headless(false).
 		Set("display", os.Getenv("DISPLAY")).
-		Set("load-extension", "./data/ublock").
-		Set("disable-extensions", "false").
-		Set("disable-blink-features", "AutomationControlled").
-		Set("disable-gpu", "true").
-		Set("no-sandbox", "true").
-		Set("no-default-browser-check", "true").
-		Set("disable-remote-fonts", "true").
-		Set("disable-background-networking", "true").
-		Set("disable-dev-shm-usage", "true").
-		Set("disable-sync", "true").
-		Set("disable-translate", "true").
-		Set("disable-default-apps", "true").
-		Set("mute-audio", "true").
-		Set("hide-scrollbars", "true")
+		Set("disable-blink-features", "AutomationControlled")
 
 	controlURL := launch.MustLaunch()
 	browser = rod.New()
