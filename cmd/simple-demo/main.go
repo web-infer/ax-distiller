@@ -1,7 +1,9 @@
 package main
 
 import (
+	"ax-distiller/internal/chrome"
 	"ax-distiller/internal/chrome/axstream"
+	"ax-distiller/internal/chrome/fastclient"
 	"context"
 	"log/slog"
 	"os"
@@ -44,8 +46,7 @@ func NewTestBrowser(chromeBin string) (browser *rod.Browser, err error) {
 
 	controlURL := launch.MustLaunch()
 	browser = rod.New()
-	client := rodcdp.New()
-	// client := fastclient.NewClient()
+	client := fastclient.New()
 	ws := &rodcdp.WebSocket{}
 	err = ws.Connect(browser.GetContext(), controlURL, nil)
 	if err != nil {
@@ -86,7 +87,7 @@ func main() {
 	}()
 
 	p := browser.MustPage("about:blank")
-	// chrome.DisableUnusedCDP(p)
+	chrome.DisableUnusedCDP(p)
 	// chrome.BlockGraphics(p)
 	err = axstream.Listen(ctx, events, p)
 	if err != nil {

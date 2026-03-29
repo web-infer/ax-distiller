@@ -1,17 +1,21 @@
-// fastclient provides a faster implementation of rod.CDPClient
+// fastclient is essentially rod.CDPClient but with
+// sonic.ConfigFastest.Unmarshal instead of json.Unmarshal
 
 package fastclient
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/bytedance/sonic"
 	"github.com/go-rod/rod/lib/cdp"
+	"github.com/go-rod/rod/lib/defaults"
+	"github.com/go-rod/rod/lib/utils"
 )
 
+// Request to send to browser.
 type Request struct {
 	ID        int    `json:"id"`
 	SessionID string `json:"sessionId,omitempty"`
@@ -19,173 +23,153 @@ type Request struct {
 	Params    any    `json:"params,omitempty"`
 }
 
-type Error struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Data    string `json:"data"`
-}
-
+// Response from browser.
 type Response struct {
+	ID     int             `json:"id"`
 	Result json.RawMessage `json:"result,omitempty"`
 	Error  *Error          `json:"error,omitempty"`
 }
 
-type ResponseResult struct {
-	done chan struct{}
-	set  bool
-	buff []byte
-	err  *Error
+// Event from browser.
+type Event = cdp.Event
+
+// WebSocketable enables you to choose the websocket lib you want to use.
+// Such as you can easily wrap gorilla/websocket and use it as the transport layer.
+type WebSocketable interface {
+	// Send text message only
+	Send(data []byte) error
+	// Read returns text message only
+	Read() ([]byte, error)
 }
 
-// Client is a faster implementation of rod.CDPClient
+// Client is a devtools protocol connection instance.
 type Client struct {
-	ws     cdp.WebSocketable
-	events chan *cdp.Event
-	count  int
+	count uint64
 
-	freed     []int
-	responses []ResponseResult
-	mu        sync.Mutex
+	ws WebSocketable
+
+	pending sync.Map    // pending requests
+	event   chan *Event // events from browser
+
+	logger utils.Logger
 }
 
-func NewClient() *Client {
+// New creates a cdp connection, all messages from Client.Event must be received or they will block the client.
+func New() *Client {
 	return &Client{
-		events: make(chan *cdp.Event, 4),
+		event:  make(chan *Event),
+		logger: defaults.CDP,
 	}
 }
 
-func (c *Client) messageWorker() {
-	defer sync.OnceFunc(c.closeAll)()
-
-	for {
-		data, err := c.ws.Read()
-		if err != nil {
-			panic(err)
-		}
-
-		idNode, err := sonic.Get(data, "id")
-		if err != nil {
-			panic(err)
-		}
-		id, err := idNode.Int64()
-		if err != nil {
-			panic(err)
-		}
-
-		if id == 0 {
-			var event cdp.Event
-			err = sonic.ConfigFastest.Unmarshal(data, &event)
-			if err != nil {
-				panic(err)
-			}
-			c.events <- &event
-			continue
-		}
-
-		// always subtract by one since the id is always added by one
-		id--
-
-		var res Response
-		err = sonic.ConfigFastest.Unmarshal(data, &res)
-		if err != nil {
-			panic(err)
-		}
-		c.responses[id].set = true
-		c.responses[id].buff = res.Result
-		c.responses[id].err = res.Error
-		c.responses[id].done <- struct{}{}
-	}
+// Logger sets the logger to log all the requests, responses, and events transferred between Rod and the browser.
+// The default format for each type is in file format.go.
+func (cdp *Client) Logger(l utils.Logger) *Client {
+	cdp.logger = l
+	return cdp
 }
 
-func (c *Client) Call(ctx context.Context, sessionID, method string, params any) (buff []byte, err error) {
-	id, done := c.addPending()
-	defer c.freePending(id)
+// Start to browser.
+func (cdp *Client) Start(ws WebSocketable) *Client {
+	cdp.ws = ws
 
-	req := Request{
-		// always add by one because id == 0 indicates an event
-		ID:        id + 1,
+	go cdp.consumeMessages()
+
+	return cdp
+}
+
+type result struct {
+	msg json.RawMessage
+	err error
+}
+
+// Call a method and wait for its response.
+func (cdp *Client) Call(ctx context.Context, sessionID, method string, params any) ([]byte, error) {
+	req := &Request{
+		ID:        int(atomic.AddUint64(&cdp.count, 1)),
 		SessionID: sessionID,
 		Method:    method,
 		Params:    params,
 	}
 
+	cdp.logger.Println(req)
+
 	data, err := sonic.ConfigFastest.Marshal(req)
-	if err != nil {
-		panic(err)
-	}
+	utils.E(err)
 
-	err = c.ws.Send(data)
-	if err != nil {
-		return
-	}
-	<-done
-
-	res := c.responses[id]
-	if !res.set {
-		err = fmt.Errorf("cdp call: canceled")
-		return
-	}
-	buff = res.buff
-	err = res.err.Error()
-	return
-}
-
-func (c *Client) addPending() (id int, done chan struct{}) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if len(c.freed) > 0 {
-		id = c.freed[len(c.freed)-1]
-		c.freed = c.freed[:len(c.freed)-1]
-
-		c.responses[id].set = false
-		c.responses[id].buff = nil
-		c.responses[id].err = nil
-
-		done = c.responses[id].done
-		return
-	}
-
-	id = c.count
-	done = make(chan struct{})
-	c.responses = append(c.responses, ResponseResult{
-		done: done,
+	done := make(chan result)
+	once := sync.Once{}
+	cdp.pending.Store(req.ID, func(res result) {
+		once.Do(func() {
+			select {
+			case <-ctx.Done():
+			case done <- res:
+			}
+		})
 	})
-	c.count++
-	return
-}
+	defer cdp.pending.Delete(req.ID)
 
-func (c *Client) freePending(id int) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.freed = append(c.freed, id)
-}
-
-func (c *Client) closeAll() {
-	// c.events may be already closed
-	_, open := <-c.events
-	if open {
-		close(c.events)
+	err = cdp.ws.Send(data)
+	if err != nil {
+		return nil, err
 	}
-	for _, r := range c.responses {
-		close(r.done)
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-done:
+		return res.msg, res.err
 	}
 }
 
-func (c *Client) Start(ws cdp.WebSocketable, workers int) {
-	c.ws = ws
-	for range workers {
-		go c.messageWorker()
-	}
+// Event returns a channel that will emit browser devtools protocol events. Must be consumed or will block producer.
+func (cdp *Client) Event() <-chan *Event {
+	return cdp.event
 }
 
-func (c *Client) Event() <-chan *cdp.Event {
-	return c.events
-}
+// Consume messages coming from the browser via the websocket.
+func (cdp *Client) consumeMessages() {
+	defer close(cdp.event)
 
-func (e *Error) Error() error {
-	if e == nil {
-		return nil
+	for {
+		data, err := cdp.ws.Read()
+		if err != nil {
+			cdp.pending.Range(func(_, val any) bool {
+				val.(func(result))(result{err: err}) //nolint: forcetypeassert
+				return true
+			})
+			return
+		}
+
+		var id struct {
+			ID int `json:"id"`
+		}
+		err = sonic.ConfigFastest.Unmarshal(data, &id)
+		utils.E(err)
+
+		if id.ID == 0 {
+			var evt Event
+			err := sonic.ConfigFastest.Unmarshal(data, &evt)
+			utils.E(err)
+			cdp.logger.Println(&evt)
+			cdp.event <- &evt
+			continue
+		}
+
+		var res Response
+		err = sonic.ConfigFastest.Unmarshal(data, &res)
+		utils.E(err)
+
+		cdp.logger.Println(&res)
+
+		val, ok := cdp.pending.Load(id.ID)
+		if !ok {
+			continue
+		}
+		if res.Error == nil {
+			val.(func(result))(result{res.Result, nil}) //nolint: forcetypeassert
+		} else {
+			val.(func(result))(result{nil, res.Error}) //nolint: forcetypeassert
+		}
 	}
-	return fmt.Errorf("cdp call (%d): %s (data: %s)", e.Code, e.Message, e.Data)
 }
