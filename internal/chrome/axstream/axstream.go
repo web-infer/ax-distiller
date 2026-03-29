@@ -1,9 +1,10 @@
-package chrome
+package axstream
 
 import (
 	"ax-distiller/internal/chrome/cdp"
 	"context"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"runtime"
 
@@ -12,52 +13,44 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 )
 
-type AXStreamEventType uint8
+type EventType uint8
 
 const (
-	AXSTREAM_EVENT_REPLACE AXStreamEventType = iota
-	AXSTREAM_EVENT_INSERT
-	AXSTREAM_EVENT_REMOVE
+	EVENT_REPLACE EventType = iota
+	EVENT_INSERT
+	EVENT_REMOVE
 )
 
-type AXStreamEvent struct {
-	Type AXStreamEventType
+type Event struct {
+	Type EventType
 	// ID refers to different nodes based on the value of Type:
 	//
-	//  - AXSTREAM_EVENT_REPLACE: The ID should be an empty string as REPLACE
+	//  - EVENT_REPLACE: The ID should be an empty string as REPLACE
 	//    would indicate that the root is replaced.
-	//  - AXSTREAM_EVENT_INSERT: The ID of the previous sibling the
+	//  - EVENT_INSERT: The ID of the previous sibling the
 	//    newly inserted node is after.
-	//  - AXSTREAM_EVENT_REMOVE: The ID of the node + subtree to remove.
+	//  - EVENT_REMOVE: The ID of the node + subtree to remove.
 	ID      proto.DOMBackendNodeID
 	Subtree *cdp.AXNodeWithRelatives
 }
 
 const (
+	event_dom_documentUpdated   = "DOM.documentUpdated"
 	event_dom_childNodeRemoved  = "DOM.childNodeRemoved"
 	event_dom_childNodeInserted = "DOM.childNodeInserted"
 	event_ax_loadComplete       = "Accessibility.loadComplete"
 )
 
-// findNodeByBackendID finds an AXNodeWithRelatives with a particular
-// DOMBackendNodeID returning nil otherwise. It uses BFS as we want a more
-// balanced average runtime
-func findNodeByBackendID(root *cdp.AXNodeWithRelatives, id proto.DOMBackendNodeID) *cdp.AXNodeWithRelatives {
-	q := []*cdp.AXNodeWithRelatives{root}
-	for len(q) > 0 {
-		popped := q[0]
-		q = q[1:]
-		if popped.BackendDOMNodeID == id {
-			return popped
-		}
-		for child := popped.FirstChild; child != nil; child = child.NextSibling {
-			q = append(q, child)
-		}
-	}
-	return nil
-}
+type workerState uint8
 
-func ListenAXStream(ctx context.Context, out chan<- AXStreamEvent, page *rod.Page) (err error) {
+const (
+	worker_init workerState = iota
+	worker_hydrated
+)
+
+func Listen(ctx context.Context, out chan<- Event, page *rod.Page) (err error) {
+	page = page.Context(ctx)
+
 	err = sonic.Pretouch(reflect.TypeFor[proto.AccessibilityAXNode]())
 	if err != nil {
 		panic(err)
@@ -66,9 +59,6 @@ func ListenAXStream(ctx context.Context, out chan<- AXStreamEvent, page *rod.Pag
 	if err != nil {
 		panic(err)
 	}
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
 	type pageEvent struct {
 		method string
@@ -81,7 +71,8 @@ func ListenAXStream(ctx context.Context, out chan<- AXStreamEvent, page *rod.Pag
 	// we have one worker that processes event asynchronously to ensure the
 	// order which events are processed is correct
 	go func() {
-		var currentRoot *cdp.AXNodeWithRelatives
+		var state workerState
+		frontendBackendDOMIDMap := make(map[proto.DOMNodeID]proto.DOMBackendNodeID)
 
 		for {
 			select {
@@ -89,6 +80,12 @@ func ListenAXStream(ctx context.Context, out chan<- AXStreamEvent, page *rod.Pag
 				return
 			case e := <-events:
 				switch e.method {
+				case event_dom_documentUpdated:
+					switch state {
+					case worker_init:
+					case worker_hydrated:
+					}
+					slog.Info("document updated!")
 				case event_ax_loadComplete:
 					/*
 						// retrieve the new root's backendDOMNodeId
@@ -127,11 +124,31 @@ func ListenAXStream(ctx context.Context, out chan<- AXStreamEvent, page *rod.Pag
 						panic(err)
 					}
 
-					// refetch & touch everything
+					// refetch
 					root := fetcher.Fetch(ctx, proto.AccessibilityAXNodeID(nodeID))
-					currentRoot = root
-					out <- AXStreamEvent{
-						Type:    AXSTREAM_EVENT_REPLACE,
+
+					// touch whole DOM to subscribe to all DOM elements
+					depth := -1
+					doc, err := cdp.Command(ctx, page, cdp.DOMGetDocument{
+						Depth:  &depth,
+						Pierce: true,
+					})
+					if err != nil {
+						panic(err)
+					}
+
+					// map all frontend ids to backend dom node ids
+					frontendBackendDOMIDMap = map[proto.DOMNodeID]proto.DOMBackendNodeID{} // clear map
+					queue := []cdp.DOMNode{doc.Root}
+					for len(queue) > 0 {
+						popped := queue[0]
+						frontendBackendDOMIDMap[popped.NodeID] = popped.BackendNodeID
+						queue = queue[1:]
+						queue = append(queue, popped.Children...)
+					}
+
+					out <- Event{
+						Type:    EVENT_REPLACE,
 						Subtree: root,
 					}
 				case event_dom_childNodeInserted:
@@ -140,14 +157,6 @@ func ListenAXStream(ctx context.Context, out chan<- AXStreamEvent, page *rod.Pag
 					err := sonic.ConfigFastest.Unmarshal(e.buff, &params)
 					if err != nil {
 						panic(err)
-					}
-					// we BFS instead of maintaining an index because indexing
-					// & de-indexing every modified subtree every time a
-					// mutation comes in is not really much faster than just
-					// straight searching
-
-					if currentRoot == nil {
-						panic("assert failed: currentRoot must never be nil when child nodes are being inserted")
 					}
 
 					// we lookup the modified parent and the previous sibling
@@ -173,8 +182,8 @@ func ListenAXStream(ctx context.Context, out chan<- AXStreamEvent, page *rod.Pag
 					}
 					subtree := fetcher.Fetch(ctx, lookup.Nodes[0].NodeID)
 
-					out <- AXStreamEvent{
-						Type:    AXSTREAM_EVENT_INSERT,
+					out <- Event{
+						Type:    EVENT_INSERT,
 						ID:      prevSibling.Node.BackendNodeID,
 						Subtree: subtree,
 					}
@@ -190,8 +199,8 @@ func ListenAXStream(ctx context.Context, out chan<- AXStreamEvent, page *rod.Pag
 					if err != nil {
 						panic(err)
 					}
-					out <- AXStreamEvent{
-						Type: AXSTREAM_EVENT_REMOVE,
+					out <- Event{
+						Type: EVENT_REMOVE,
 						ID:   removedLookup.Node.BackendNodeID,
 					}
 				default:
@@ -201,20 +210,37 @@ func ListenAXStream(ctx context.Context, out chan<- AXStreamEvent, page *rod.Pag
 		}
 	}()
 
-	for msg := range page.Event() {
-		method := msg.Method
-		buff := reflect.ValueOf(msg).Elem().FieldByName("data").Bytes()
-
-		switch method {
-		case event_ax_loadComplete, event_dom_childNodeInserted, event_dom_childNodeRemoved:
-			// non-blocking but ordered
-			go func() {
-				events <- pageEvent{
-					method: method,
-					buff:   buff,
-				}
-			}()
-		}
+	err = cdp.CommandUnary(ctx, page, proto.DOMEnable{})
+	if err != nil {
+		return
 	}
+	err = cdp.CommandUnary(ctx, page, proto.AccessibilityEnable{})
+	if err != nil {
+		return
+	}
+
+	pageEvents := page.Event()
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg := <-pageEvents:
+				method := msg.Method
+				buff := reflect.ValueOf(msg).Elem().FieldByName("data").Bytes()
+
+				switch method {
+				case event_ax_loadComplete, event_dom_childNodeInserted, event_dom_childNodeRemoved:
+					// non-blocking but ordered
+					go func() {
+						events <- pageEvent{
+							method: method,
+							buff:   buff,
+						}
+					}()
+				}
+			}
+		}
+	}()
 	return
 }
