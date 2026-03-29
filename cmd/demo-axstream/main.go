@@ -4,6 +4,8 @@ import (
 	"ax-distiller/internal/chrome"
 	"ax-distiller/internal/chrome/axstream"
 	"ax-distiller/internal/chrome/fastclient"
+	"ax-distiller/internal/postprocess"
+	"ax-distiller/internal/structure"
 	"context"
 	"log/slog"
 	"os"
@@ -76,12 +78,16 @@ func main() {
 	go func() {
 		for e := range events {
 			switch e.Type {
+			case axstream.EVENT_REPLACE:
+				filtered := postprocess.FilterIgnored(e.Subtree)
+				constructed := structure.Construct(filtered)
+				slog.Info("event replace root", "hash", constructed.Hash)
 			case axstream.EVENT_INSERT:
-				slog.Info("event insert", "subtree_role", e.Subtree.Role.Value, "prev_sibling", e.ID)
+				filtered := postprocess.FilterIgnored(e.Subtree)
+				constructed := structure.Construct(filtered)
+				slog.Info("event insert", "prev_sibling", e.ID, "hash", constructed.Hash)
 			case axstream.EVENT_REMOVE:
 				slog.Info("event remove", "id", e.ID)
-			case axstream.EVENT_REPLACE:
-				slog.Info("event replace root")
 			}
 		}
 	}()
