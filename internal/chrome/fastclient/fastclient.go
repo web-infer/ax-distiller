@@ -60,16 +60,16 @@ func (c *Client) messageWorker() {
 	for {
 		data, err := c.ws.Read()
 		if err != nil {
-			return
+			panic(err)
 		}
 
 		idNode, err := sonic.Get(data, "id")
 		if err != nil {
-			return
+			panic(err)
 		}
 		id, err := idNode.Int64()
 		if err != nil {
-			return
+			panic(err)
 		}
 
 		if id == 0 {

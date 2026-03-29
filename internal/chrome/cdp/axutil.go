@@ -3,7 +3,7 @@ package cdp
 import (
 	"ax-distiller/internal/syncx"
 	"context"
-	"log/slog"
+	"sync"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
@@ -29,12 +29,10 @@ func (j axSubtreeWork) Exec() {
 		j.fetcher.page,
 		GetChildAXNodes{ID: j.node.NodeID},
 	)
+	if err == context.Canceled {
+		return
+	}
 	if err != nil {
-		slog.Warn(
-			"[axtree] get child ax nodes",
-			"id", j.node.NodeID,
-			"err", err,
-		)
 		return
 	}
 
@@ -78,6 +76,10 @@ type AXSubtreeFetcher struct {
 	page *rod.Page
 	root *AXNodeWithRelatives
 	pool *syncx.WorkerPool[axSubtreeWork]
+
+	err    error
+	once   sync.Once
+	cancel func()
 }
 
 func NewAXSubtreeFetcher(page *rod.Page, workers int) *AXSubtreeFetcher {
@@ -87,12 +89,19 @@ func NewAXSubtreeFetcher(page *rod.Page, workers int) *AXSubtreeFetcher {
 	}
 }
 
+func (f *AXSubtreeFetcher) exit(err error) {
+	f.once.Do(func() {
+		f.err = err
+		f.cancel()
+	})
+}
+
 func (f *AXSubtreeFetcher) Start(ctx context.Context) {
 	f.pool.Start(ctx)
 }
 
-func (f *AXSubtreeFetcher) Fetch(ctx context.Context, nodeID proto.AccessibilityAXNodeID) *AXNodeWithRelatives {
-	f.ctx = ctx
+func (f *AXSubtreeFetcher) Fetch(ctx context.Context, nodeID proto.AccessibilityAXNodeID) (out *AXNodeWithRelatives, err error) {
+	f.ctx, f.cancel = context.WithCancel(ctx)
 	f.root = &AXNodeWithRelatives{
 		// technically only the NodeID is required
 		AXNode: &AXNode{NodeID: nodeID},
@@ -101,6 +110,14 @@ func (f *AXSubtreeFetcher) Fetch(ctx context.Context, nodeID proto.Accessibility
 		fetcher: f,
 		node:    f.root,
 	})
-	f.pool.Wait()
-	return f.root
+	select {
+	case <-f.ctx.Done():
+	case <-f.pool.Wait():
+	}
+	if f.err != nil {
+		err = f.err
+		return
+	}
+	out = f.root
+	return
 }

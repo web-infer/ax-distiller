@@ -1,17 +1,16 @@
 package main
 
 import (
-	"ax-distiller/internal/chrome"
-	"ax-distiller/internal/chrome/fastclient"
+	"ax-distiller/internal/chrome/axstream"
 	"context"
 	"log/slog"
 	"os"
 	"os/signal"
-	"runtime"
 
 	"github.com/go-rod/rod"
 	rodcdp "github.com/go-rod/rod/lib/cdp"
 	"github.com/go-rod/rod/lib/launcher"
+	"github.com/lmittmann/tint"
 )
 
 func NewTestBrowser(chromeBin string) (browser *rod.Browser, err error) {
@@ -45,14 +44,14 @@ func NewTestBrowser(chromeBin string) (browser *rod.Browser, err error) {
 
 	controlURL := launch.MustLaunch()
 	browser = rod.New()
-	client := fastclient.NewClient()
+	client := rodcdp.New()
+	// client := fastclient.NewClient()
 	ws := &rodcdp.WebSocket{}
 	err = ws.Connect(browser.GetContext(), controlURL, nil)
 	if err != nil {
 		panic(err)
 	}
-
-	client.Start(ws, runtime.NumCPU())
+	client.Start(ws)
 	browser.Client(client)
 	browser.MustConnect()
 	return
@@ -62,30 +61,39 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
+	logger := slog.New(tint.NewHandler(os.Stderr, &tint.Options{
+		Level: slog.LevelDebug,
+	}))
+	slog.SetDefault(logger)
+
 	browser, err := NewTestBrowser("chromium")
 	if err != nil {
 		panic(err)
 	}
 
-	events := make(chan chrome.AXStreamEvent)
+	events := make(chan axstream.Event)
 	go func() {
 		for e := range events {
 			switch e.Type {
-			case chrome.AXSTREAM_EVENT_INSERT:
+			case axstream.EVENT_INSERT:
 				slog.Info("event insert", "subtree_role", e.Subtree.Role.Value, "prev_sibling", e.ID)
-			case chrome.AXSTREAM_EVENT_REMOVE:
+			case axstream.EVENT_REMOVE:
 				slog.Info("event remove", "id", e.ID)
-			case chrome.AXSTREAM_EVENT_REPLACE:
+			case axstream.EVENT_REPLACE:
 				slog.Info("event replace root")
 			}
 		}
 	}()
-	p := browser.MustPage("https://amazon.com")
-	chrome.DisableUnusedCDP(p)
-	// chrome.BlockGraphics(p)
 
-	err = chrome.ListenAXStream(ctx, events, p)
+	p := browser.MustPage("about:blank")
+	// chrome.DisableUnusedCDP(p)
+	// chrome.BlockGraphics(p)
+	err = axstream.Listen(ctx, events, p)
 	if err != nil {
 		panic(err)
 	}
+
+	p.MustNavigate("https://amazon.com")
+
+	<-ctx.Done()
 }

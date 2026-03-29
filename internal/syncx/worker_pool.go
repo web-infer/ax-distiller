@@ -51,6 +51,12 @@ func (b *WorkerPool[T]) Start(ctx context.Context) {
 	}
 }
 
-func (b *WorkerPool[T]) Wait() {
-	b.wg.Wait()
+// Wait returns a channel which is closed when the wait group is empty
+func (b *WorkerPool[T]) Wait() <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		b.wg.Wait()
+		close(done)
+	}()
+	return done
 }

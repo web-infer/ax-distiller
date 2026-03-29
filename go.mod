@@ -6,6 +6,7 @@ require (
 	github.com/bytedance/sonic v1.15.0
 	github.com/elliotchance/orderedmap/v3 v3.1.0
 	github.com/go-rod/rod v0.116.2
+	github.com/lmittmann/tint v1.1.3
 	github.com/xlab/treeprint v1.2.0
 	github.com/zeebo/xxh3 v1.1.0
 )
