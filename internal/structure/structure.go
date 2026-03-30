@@ -4,6 +4,7 @@ import (
 	"ax-distiller/internal/chrome/cdp"
 	"ax-distiller/internal/tree"
 	"encoding/binary"
+	"fmt"
 	"unique"
 
 	"github.com/elliotchance/orderedmap/v3"
@@ -333,7 +334,7 @@ func Construct(current *cdp.AXNodeWithRelatives) (ret *Structure) {
 func (s *Structure) Debug() tree.DebugInfo {
 	meta := s.Underlying.Role.Value
 	return tree.DebugInfo{
-		Name:     s.Hash,
+		Name:     fmt.Sprintf("%v (%v)", s.Hash, s.Underlying.BackendDOMNodeID),
 		Metadata: meta,
 	}
 }
