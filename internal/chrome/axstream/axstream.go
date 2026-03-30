@@ -55,27 +55,18 @@ const (
 )
 
 func isInvalidNodeCDPErr(err error) bool {
-	return strings.Contains(err.Error(), "Could not find") || strings.Contains(err.Error(), "Invalid ID")
+	return strings.Contains(err.Error(), "Could not find") ||
+		strings.Contains(err.Error(), "Invalid ID") ||
+		strings.Contains(err.Error(), "No node found")
 }
 
 func Listen(ctx context.Context, out chan<- Event, page *rod.Page) (err error) {
 	page = page.Context(ctx)
 
-	err = sonic.Pretouch(reflect.TypeFor[proto.AccessibilityAXNode]())
-	if err != nil {
-		panic(err)
-	}
-	err = sonic.Pretouch(reflect.TypeFor[proto.DOMNode]())
-	if err != nil {
-		panic(err)
-	}
-
 	type pageEvent struct {
 		method string
 		buff   []byte
 	}
-	fetcher := cdp.NewAXSubtreeFetcher(page, 4)
-	fetcher.Start(ctx)
 
 	err = cdp.CommandUnary(ctx, page, proto.DOMEnable{})
 	if err != nil {
@@ -105,19 +96,18 @@ func Listen(ctx context.Context, out chan<- Event, page *rod.Page) (err error) {
 					case event_ax_loadComplete:
 						switch state {
 						case worker_init, worker_hydrated:
-							// this should work fine, I am not sure why the above code
-							// was there before
-							rootIDAST, err := sonic.Get(buff, "root", "nodeId")
-							if err != nil {
-								panic(err)
+							var ev struct {
+								Root struct {
+									BackendNodeID proto.DOMBackendNodeID `json:"backendDOMNodeId"`
+								}
 							}
-							nodeID, err := rootIDAST.String()
+							err := sonic.ConfigFastest.Unmarshal(buff, &ev)
 							if err != nil {
 								panic(err)
 							}
 
-							// refetch
-							root, err := fetcher.Fetch(ctx, proto.AccessibilityAXNodeID(nodeID))
+							// fetch full AX tree
+							root, err := cdp.GetSubtree(ctx, page, ev.Root.BackendNodeID, cdp.GetAXTreeOptions{})
 							if err != nil {
 								if isInvalidNodeCDPErr(err) {
 									// stale event, abort
@@ -127,9 +117,9 @@ func Listen(ctx context.Context, out chan<- Event, page *rod.Page) (err error) {
 							}
 
 							// touch whole DOM to subscribe to all DOM elements
-							depth := -1
+							pDepth := -1
 							doc, err := cdp.Command(ctx, page, cdp.DOMGetDocument{
-								Depth:  &depth,
+								Depth:  &pDepth,
 								Pierce: true,
 							})
 							if err != nil {
@@ -173,18 +163,20 @@ func Listen(ctx context.Context, out chan<- Event, page *rod.Page) (err error) {
 								panic(err)
 							}
 							parentID := parent.Node.BackendNodeID
-							_, ok := frontBackMap.Lookup(params.ParentNodeID)
-							if !ok {
-								panic("assert failed: parent doesn't exist")
-							}
+							// _, ok := frontBackMap.Lookup(params.ParentNodeID)
+							// if !ok {
+							// 	fmt.Println(parentID)
+							// 	panic("assert failed: parent doesn't exist")
+							// }
 
 							var prevSiblingID *proto.DOMBackendNodeID
 							// 0 indicates the node is the first child of the parent
 							if params.PreviousNodeID != 0 {
-								_, ok := frontBackMap.Lookup(params.PreviousNodeID)
-								if !ok {
-									panic("assert failed: prevSibling doesn't exist")
-								}
+								// _, ok := frontBackMap.Lookup(params.PreviousNodeID)
+								// if !ok {
+								// 	fmt.Println(params.PreviousNodeID)
+								// 	panic("assert failed: prevSibling doesn't exist")
+								// }
 								// we lookup the modified parent and the previous sibling
 								// which the inserted node is after
 								prevSibling, err := cdp.Command(ctx, page, cdp.DOMGetBackendNodeID{
@@ -204,22 +196,12 @@ func Listen(ctx context.Context, out chan<- Event, page *rod.Page) (err error) {
 							}
 
 							// we fetch the subtree of the newly inserted node
-							pFetchRelatives := true
-							lookup, err := cdp.Command(ctx, page, cdp.GetPartialAXTree{
-								BackendNodeID:  proto.DOMBackendNodeID(params.Node.BackendNodeID),
-								FetchRelatives: &pFetchRelatives,
-							})
-							if err != nil {
-								if isInvalidNodeCDPErr(err) {
-									// stale event, abort
-									break
-								}
-								panic(err)
-							}
-							if len(lookup.Nodes) < 1 {
-								panic("assert failed: fetch partial ax tree of a single node should return at least 1 node")
-							}
-							subtree, err := fetcher.Fetch(ctx, lookup.Nodes[0].NodeID)
+							subtree, err := cdp.GetSubtree(
+								ctx,
+								page,
+								proto.DOMBackendNodeID(params.Node.BackendNodeID),
+								cdp.GetAXTreeOptions{},
+							)
 							if err != nil {
 								if isInvalidNodeCDPErr(err) {
 									// stale event, abort

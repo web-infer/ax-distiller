@@ -10,7 +10,7 @@ type Value[T any] struct {
 // unnecessary fields that slow down parsing
 type AXNode struct {
 	NodeID           proto.AccessibilityAXNodeID   `json:"nodeId"`
-	BackendDOMNodeID proto.DOMBackendNodeID        `json:"backendDOMNodeId,omitempty"`
+	BackendDOMNodeID proto.DOMBackendNodeID        `json:"backendDOMNodeId"`
 	ChildIDs         []proto.AccessibilityAXNodeID `json:"childIds,omitempty"`
 
 	Ignored  bool          `json:"ignored"`
@@ -21,7 +21,7 @@ type AXNode struct {
 }
 
 type AXNodesResult struct {
-	Nodes []AXNode `json:"nodes"`
+	Nodes []*AXNode `json:"nodes"`
 }
 
 // GetFullAXTree (experimental) Fetches the entire accessibility tree for the root Document.
@@ -44,10 +44,10 @@ func (GetFullAXTree) Call(c proto.Client) (out *AXNodesResult, err error) { retu
 // GetPartialAXTree (experimental) Fetches the accessibility node and partial accessibility tree for this DOM node, if it exists.
 type GetPartialAXTree struct {
 	// NodeID (optional) Identifier of the node to get the partial accessibility tree for.
-	NodeID proto.DOMNodeID `json:"nodeId,omitempty"`
+	NodeID *proto.DOMNodeID `json:"nodeId,omitempty"`
 
 	// BackendNodeID (optional) Identifier of the backend node to get the partial accessibility tree for.
-	BackendNodeID proto.DOMBackendNodeID `json:"backendNodeId,omitempty"`
+	BackendNodeID *proto.DOMBackendNodeID `json:"backendNodeId,omitempty"`
 
 	// ObjectID (optional) JavaScript object id of the node wrapper to get the partial accessibility tree for.
 	ObjectID proto.RuntimeRemoteObjectID `json:"objectId,omitempty"`
@@ -74,3 +74,19 @@ type GetChildAXNodes struct {
 func (GetChildAXNodes) ProtoReq() string { return "Accessibility.getChildAXNodes" }
 
 func (GetChildAXNodes) Call(c proto.Client) (out *AXNodesResult, err error) { return }
+
+type QueryAXTree struct {
+	NodeID         proto.DOMNodeID             `json:"nodeId,omitempty"`
+	BackendNodeID  *proto.DOMBackendNodeID     `json:"backendNodeId,omitempty"`
+	ObjectId       proto.RuntimeRemoteObjectID `json:"objectId,omitempty"`
+	AccessibleName string                      `json:"accessibleName,omitempty"`
+	Role           string                      `json:"role,omitempty"`
+}
+
+func (QueryAXTree) ProtoReq() string { return "Accessibility.queryAXTree" }
+
+func (QueryAXTree) Call(c proto.Client) (out *QueryAXTreeResult, err error) { return }
+
+type QueryAXTreeResult struct {
+	Nodes []*AXNode `json:"nodes"`
+}

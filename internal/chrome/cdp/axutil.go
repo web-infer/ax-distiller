@@ -1,69 +1,12 @@
 package cdp
 
 import (
-	"ax-distiller/internal/syncx"
 	"context"
-	"sync"
+	"log/slog"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
 )
-
-type axSubtreeWork struct {
-	fetcher *AXSubtreeFetcher
-	node    *AXNodeWithRelatives
-}
-
-func (j axSubtreeWork) Exec() {
-	// if NodeID is a negative number, we know it is a leaf
-	if j.node.NodeID[0] == '-' {
-		return
-	}
-	// this always causes "invalid ID for some reason"
-	if j.node.NodeID == "0" {
-		return
-	}
-
-	res, err := Command(
-		j.fetcher.ctx,
-		j.fetcher.page,
-		GetChildAXNodes{ID: j.node.NodeID},
-	)
-	if err == context.Canceled {
-		return
-	}
-	if err != nil {
-		return
-	}
-
-	var prev *AXNodeWithRelatives
-	for i, child := range res.Nodes {
-		// the CDP get child nodes command returns BOTH the "ignored" nodes that
-		// are the actual direct descendents of the current AX node and the AX
-		// nodes that would be the direct descendents with the ignored nodes
-		// removed. therefore we should ignore "none" nodes which are nodes that
-		// are removed.
-		if child.Role.Value == "none" {
-			continue
-		}
-
-		childOutput := &AXNodeWithRelatives{
-			AXNode: &res.Nodes[i],
-		}
-
-		if prev != nil {
-			prev.NextSibling = childOutput
-		} else {
-			j.node.FirstChild = childOutput
-		}
-
-		j.fetcher.pool.Add(axSubtreeWork{
-			fetcher: j.fetcher,
-			node:    childOutput,
-		})
-		prev = childOutput
-	}
-}
 
 type AXNodeWithRelatives struct {
 	*AXNode
@@ -71,53 +14,72 @@ type AXNodeWithRelatives struct {
 	NextSibling *AXNodeWithRelatives
 }
 
-type AXSubtreeFetcher struct {
-	ctx  context.Context
-	page *rod.Page
-	root *AXNodeWithRelatives
-	pool *syncx.WorkerPool[axSubtreeWork]
-
-	err    error
-	once   sync.Once
-	cancel func()
+type GetAXTreeOptions struct {
+	WithName string
+	WithRole string
 }
 
-func NewAXSubtreeFetcher(page *rod.Page, workers int) *AXSubtreeFetcher {
-	return &AXSubtreeFetcher{
-		page: page,
-		pool: syncx.NewWorkerPool[axSubtreeWork](workers),
-	}
-}
-
-func (f *AXSubtreeFetcher) exit(err error) {
-	f.once.Do(func() {
-		f.err = err
-		f.cancel()
+func GetSubtree(
+	ctx context.Context,
+	page *rod.Page,
+	rootId proto.DOMBackendNodeID,
+	opts GetAXTreeOptions,
+) (root *AXNodeWithRelatives, err error) {
+	fetchRelatives := false
+	nodeInfo, err := Command(ctx, page, GetPartialAXTree{
+		BackendNodeID:  &rootId,
+		FetchRelatives: &fetchRelatives,
 	})
-}
-
-func (f *AXSubtreeFetcher) Start(ctx context.Context) {
-	f.pool.Start(ctx)
-}
-
-func (f *AXSubtreeFetcher) Fetch(ctx context.Context, nodeID proto.AccessibilityAXNodeID) (out *AXNodeWithRelatives, err error) {
-	f.ctx, f.cancel = context.WithCancel(ctx)
-	f.root = &AXNodeWithRelatives{
-		// technically only the NodeID is required
-		AXNode: &AXNode{NodeID: nodeID},
-	}
-	f.pool.Add(axSubtreeWork{
-		fetcher: f,
-		node:    f.root,
-	})
-	select {
-	case <-f.ctx.Done():
-	case <-f.pool.Wait():
-	}
-	if f.err != nil {
-		err = f.err
+	if err != nil {
 		return
 	}
-	out = f.root
+	if len(nodeInfo.Nodes) == 0 {
+		panic("assert failed: expected exactly one node to be returned from GetPartialAXTree")
+	}
+	rootInfo := nodeInfo.Nodes[0]
+	subtree, err := Command(ctx, page, QueryAXTree{
+		BackendNodeID:  &rootId,
+		AccessibleName: opts.WithName,
+		Role:           opts.WithRole,
+	})
+	if err != nil {
+		return
+	}
+	if len(subtree.Nodes) == 0 {
+		var children AXNodesResult
+		children, err = Command(ctx, page, GetChildAXNodes{
+			ID: rootInfo.NodeID,
+		})
+		if err != nil {
+			return
+		}
+		slog.Info("found children", "result", children)
+	}
+	nodes := make(map[proto.AccessibilityAXNodeID]*AXNode)
+	nodes[rootInfo.NodeID] = rootInfo
+	for _, n := range subtree.Nodes {
+		nodes[n.NodeID] = n
+	}
+	root = getSubtreeInner(nodes, []proto.AccessibilityAXNodeID{rootInfo.NodeID})
 	return
+}
+
+func getSubtreeInner(
+	m map[proto.AccessibilityAXNodeID]*AXNode,
+	siblings []proto.AccessibilityAXNodeID,
+) *AXNodeWithRelatives {
+	if len(siblings) == 0 {
+		return nil
+	}
+	node, ok := m[siblings[0]]
+	if !ok {
+		panic("assert failed: expect node to exist in accessibility map")
+	}
+	fc := getSubtreeInner(m, node.ChildIDs)
+	ns := getSubtreeInner(m, siblings[1:])
+	return &AXNodeWithRelatives{
+		AXNode:      node,
+		FirstChild:  fc,
+		NextSibling: ns,
+	}
 }
