@@ -16,10 +16,14 @@ algo:
 			- return
 		- if success: we may see change event for root
 			- recurse with child
+
+algo is considered correct if: eventually, all inserted (non-deleted) nodes
+will have been fetched
 *)
 
 CONSTANT POSSIBLE_IDS
 CONSTANT NEW_INSERT_MAX_SIZE
+CONSTANT MAX_DELETIONS
 
 \* fn[node_id, record[id: node_id, children: seq[node_id]]]
 VARIABLE nodes
@@ -31,13 +35,16 @@ VARIABLE fetched
 VARIABLE queued_events
 \* seq[node_id]
 VARIABLE queued_fetches
+\* int
+VARIABLE delete_count
 
 vars == <<
 	nodes,
 	removed_nodes,
 	fetched,
 	queued_events,
-	queued_fetches
+	queued_fetches,
+	delete_count
 >>
 
 Init ==
@@ -48,6 +55,7 @@ Init ==
 	/\ removed_nodes = {}
 	/\ queued_events = << >>
 	/\ queued_fetches = << >>
+	/\ delete_count = 0
 
 TupleSet(tuple) ==
 	{tuple[i] : i \in DOMAIN tuple}
@@ -94,19 +102,23 @@ IN
 	/\ UNCHANGED removed_nodes
 	/\ UNCHANGED queued_fetches
 	/\ UNCHANGED fetched
+	/\ UNCHANGED delete_count
 
 \* node removed somewhere in the tree (excluding root)
-NodeRemove == \E parent \in DOMAIN nodes : Len(nodes[parent].children) > 0 /\ LET
-	target == CHOOSE n \in TupleSet(nodes[parent].children) : TRUE
-	without_target == [k \in (DOMAIN nodes \ {target}) |-> nodes[k]]
-IN
-	/\ nodes' = [without_target EXCEPT
-		![parent] = [without_target[parent] EXCEPT
-			!.children = SelectSeq(without_target[parent].children, LAMBDA x : x /= target)]]
-	/\ queued_events' = IF parent \in fetched THEN Append(queued_events, parent) ELSE queued_events
-	/\ removed_nodes' = removed_nodes \cup {target}
-	/\ UNCHANGED queued_fetches
-	/\ UNCHANGED fetched
+NodeRemove ==
+	/\ delete_count < MAX_DELETIONS
+	/\ \E parent \in DOMAIN nodes : Len(nodes[parent].children) > 0 /\ LET
+			target == CHOOSE n \in TupleSet(nodes[parent].children) : TRUE
+			without_target == [k \in (DOMAIN nodes \ {target}) |-> nodes[k]]
+		IN
+			/\ nodes' = [without_target EXCEPT
+				![parent] = [without_target[parent] EXCEPT
+					!.children = SelectSeq(without_target[parent].children, LAMBDA x : x /= target)]]
+			/\ queued_events' = IF parent \in fetched THEN Append(queued_events, parent) ELSE queued_events
+			/\ removed_nodes' = removed_nodes \cup {target}
+			/\ delete_count' = delete_count + 1
+			/\ UNCHANGED queued_fetches
+			/\ UNCHANGED fetched
 
 \* event being received and handled (ax-distiller side)
 \*
@@ -120,6 +132,7 @@ IN
 	/\ UNCHANGED nodes
 	/\ UNCHANGED fetched
 	/\ UNCHANGED removed_nodes
+	/\ UNCHANGED delete_count
 
 \* fetch request received and handled (browser-side)
 BrowserHandleFetch == Len(queued_fetches) > 0 /\ LET
@@ -131,6 +144,7 @@ IN
 	/\ UNCHANGED nodes
 	/\ UNCHANGED removed_nodes
 	/\ UNCHANGED queued_events
+	/\ UNCHANGED delete_count
 
 Next ==
 	\/ NodeInsert
@@ -139,8 +153,16 @@ Next ==
 	\/ BrowserHandleFetch
 	\/ UNCHANGED vars
 
+AllInsertedFetched ==
+	DOMAIN nodes = fetched
+
+NoMissingNodes ==
+	DOMAIN nodes \cup removed_nodes = POSSIBLE_IDS
+
 Spec ==
 	/\ Init
 	/\ [][Next]_vars
+	/\ []NoMissingNodes
+	/\ <>AllInsertedFetched
 
 ====
