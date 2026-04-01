@@ -22,7 +22,7 @@ will have been fetched
 *)
 
 CONSTANT POSSIBLE_IDS
-CONSTANT MAX_DELETIONS
+CONSTANT MAX_DELETE_ACTIONS
 
 \* fn[node_id, record[id: node_id, children: seq[node_id]]]
 VARIABLE nodes
@@ -35,7 +35,7 @@ VARIABLE queued_events
 \* seq[node_id]
 VARIABLE queued_fetches
 \* int
-VARIABLE delete_count
+VARIABLE delete_action_count
 
 vars == <<
 	nodes,
@@ -43,20 +43,21 @@ vars == <<
 	fetched,
 	queued_events,
 	queued_fetches,
-	delete_count
+	delete_action_count
 >>
 
 Init ==
-	/\ nodes = LET
+	/\ LET
 			\* CHOOSE is used here because it doesn't really matter what ID
 			\* value we set the root to
 			root == CHOOSE r \in POSSIBLE_IDS : TRUE
-		IN [k \in {root} |-> [id |-> k, children |-> << >>]]
-	/\ fetched = {}
+		IN
+			/\ nodes = [k \in {root} |-> [id |-> k, children |-> << >>]]
+			/\ fetched = {}
 	/\ removed_nodes = {}
 	/\ queued_events = << >>
 	/\ queued_fetches = << >>
-	/\ delete_count = 0
+	/\ delete_action_count = 0
 
 TupleSet(tuple) ==
 	{tuple[i] : i \in DOMAIN tuple}
@@ -83,7 +84,7 @@ NodeInsert ==
 	/\ UNCHANGED removed_nodes
 	/\ UNCHANGED queued_fetches
 	/\ UNCHANGED fetched
-	/\ UNCHANGED delete_count
+	/\ UNCHANGED delete_action_count
 
 (*
 1. we remove the current target from the function list
@@ -102,36 +103,41 @@ removeNodeAndChildren(nodelist, siblings, idx) == IF idx <= Len(siblings) THEN
 			targetChildren == nodelist[target].children
 		IN
 			IF Len(targetChildren) > 0 THEN
-				removeNodeAndChildren(withNextSiblingsRemoved, targetChildren, 1)
+				removeNodeAndChildren(withNextSiblingsRemoved.nodes, targetChildren, 1)
 			ELSE
-				nodelist
-		withTargetRemoved == [
-			k \in (DOMAIN withChildrenRemoved \ {target}) |-> withChildrenRemoved[k]
-		]
+				[nodes |-> withNextSiblingsRemoved.nodes, set |-> {}]
 	IN
-		withTargetRemoved
+		[
+			nodes |-> [
+				k \in (DOMAIN withChildrenRemoved.nodes \ {target}) |-> withChildrenRemoved.nodes[k]
+			],
+			set |-> withNextSiblingsRemoved.set \cup
+				withChildrenRemoved.set \cup
+				{target}
+		]
 ELSE
-	nodelist
+	[nodes |-> nodelist, set |-> {}]
 
 \* node removed somewhere in the tree (excluding root)
 NodeRemove ==
-	/\ delete_count < MAX_DELETIONS
+	/\ delete_action_count < MAX_DELETE_ACTIONS
 	/\ \E parent \in DOMAIN nodes :
 		/\ Len(nodes[parent].children) > 0
 		/\ \E target \in TupleSet(nodes[parent].children) : LET
+				removed == removeNodeAndChildren(nodes, << target >>, 1)
 				new_nodes == [
-					removeNodeAndChildren(nodes, << target >>, 1) EXCEPT
+					removed.nodes EXCEPT
 					![parent] = [@ EXCEPT !.children = SelectSeq(@, LAMBDA child : child /= target)]
 				]
 			IN
 				/\ nodes' = new_nodes
+				/\ removed_nodes' = removed_nodes \cup removed.set
 				/\ queued_events' = IF parent \in fetched THEN
 					Append(queued_events, [
 						parent |-> parent,
 						children |-> new_nodes[parent].children
 					]) ELSE queued_events
-				/\ removed_nodes' = removed_nodes \cup {target}
-				/\ delete_count' = delete_count + 1
+				/\ delete_action_count' = delete_action_count + 1
 				/\ UNCHANGED queued_fetches
 				/\ UNCHANGED fetched
 
@@ -147,7 +153,7 @@ IN
 	/\ UNCHANGED nodes
 	/\ UNCHANGED fetched
 	/\ UNCHANGED removed_nodes
-	/\ UNCHANGED delete_count
+	/\ UNCHANGED delete_action_count
 
 \* fetch request received and handled (browser-side)
 BrowserHandleFetch == Len(queued_fetches) > 0 /\ LET
@@ -159,7 +165,7 @@ IN
 	/\ UNCHANGED nodes
 	/\ UNCHANGED removed_nodes
 	/\ UNCHANGED queued_events
-	/\ UNCHANGED delete_count
+	/\ UNCHANGED delete_action_count
 
 Next ==
 	\/ NodeInsert
