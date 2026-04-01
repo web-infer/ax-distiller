@@ -118,16 +118,22 @@ NodeRemove ==
 	/\ delete_count < MAX_DELETIONS
 	/\ \E parent \in DOMAIN nodes :
 		/\ Len(nodes[parent].children) > 0
-		/\ \E target \in TupleSet(nodes[parent].children) :
-			/\ nodes' = [
+		/\ \E target \in TupleSet(nodes[parent].children) : LET
+				new_nodes == [
 					removeNodeAndChildren(nodes, << target >>, 1) EXCEPT
 					![parent] = [@ EXCEPT !.children = SelectSeq(@, LAMBDA child : child /= target)]
 				]
-			/\ queued_events' = IF parent \in fetched THEN Append(queued_events, parent) ELSE queued_events
-			/\ removed_nodes' = removed_nodes \cup {target}
-			/\ delete_count' = delete_count + 1
-			/\ UNCHANGED queued_fetches
-			/\ UNCHANGED fetched
+			IN
+				/\ nodes' = new_nodes
+				/\ queued_events' = IF parent \in fetched THEN
+					Append(queued_events, [
+						parent |-> parent,
+						children |-> new_nodes[parent].children
+					]) ELSE queued_events
+				/\ removed_nodes' = removed_nodes \cup {target}
+				/\ delete_count' = delete_count + 1
+				/\ UNCHANGED queued_fetches
+				/\ UNCHANGED fetched
 
 \* event being received and handled (ax-distiller side)
 \*
