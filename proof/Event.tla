@@ -1,5 +1,5 @@
 ---- MODULE Event ----
-EXTENDS Integers, Sequences, TLC
+EXTENDS Integers, Sequences, TLC, FiniteSets
 
 (*
 algo:
@@ -22,7 +22,6 @@ will have been fetched
 *)
 
 CONSTANT POSSIBLE_IDS
-CONSTANT NEW_INSERT_MAX_SIZE
 CONSTANT MAX_DELETIONS
 
 \* fn[node_id, record[id: node_id, children: seq[node_id]]]
@@ -49,6 +48,8 @@ vars == <<
 
 Init ==
 	/\ nodes = LET
+			\* CHOOSE is used here because it doesn't really matter what ID
+			\* value we set the root to
 			root == CHOOSE r \in POSSIBLE_IDS : TRUE
 		IN [k \in {root} |-> [id |-> k, children |-> << >>]]
 	/\ fetched = {}
@@ -63,57 +64,65 @@ TupleSet(tuple) ==
 FuncSetKey(fn, key, value) ==
 	[k \in DOMAIN fn \cup {key} |-> IF k = key THEN value ELSE fn[k]]
 
-RECURSIVE NewStructure(_, _)
-
-NewStructure(existing_nodes, depth) == LET
-	possible_nodes == (POSSIBLE_IDS \ removed_nodes) \ DOMAIN existing_nodes
-IN
-	IF depth < NEW_INSERT_MAX_SIZE /\ possible_nodes /= {} THEN
-		LET
-			new_id == CHOOSE id \in possible_nodes : TRUE
-			parent == CHOOSE id \in DOMAIN existing_nodes : TRUE
-			new_nodes == FuncSetKey(
-				[existing_nodes EXCEPT
-					![parent] = [existing_nodes[parent] EXCEPT
-						!.children = Append(existing_nodes[parent].children, new_id)
-					]
-				],
-				new_id, [id |-> new_id, children |-> << >>]
-			)
-			rec == NewStructure(new_nodes, depth + 1)
-		IN
-			[nodes |-> rec.nodes, parent |-> parent]
-	ELSE
-		[nodes |-> existing_nodes, parent |-> -1]
-
 \* node(s) inserted somewhere in the tree (excluding root)
-NodeInsert == LET
-	res == NewStructure(nodes, 0)
-IN
-	/\ res.parent \in POSSIBLE_IDS
-	/\ nodes' = res.nodes
-	/\ IF res.parent \in fetched THEN
+NodeInsert ==
+	/\ \E new_id \in ((POSSIBLE_IDS \ removed_nodes) \ DOMAIN nodes) :
+		\E parent_id \in DOMAIN nodes : LET
+			new_parent == [nodes[parent_id] EXCEPT
+				!.children = Append(@, new_id)
+			]
+		IN
+			nodes' = FuncSetKey(
+				[nodes EXCEPT ![parent_id] = new_parent],
+				new_id, [id |-> new_id, children |-> << >>]
+			) /\
 			queued_events' = Append(queued_events, [
-				parent |-> res.parent,
-				children |-> res.nodes[res.parent].children
+				parent |-> parent_id,
+				children |-> new_parent.children
 			])
-		ELSE
-			UNCHANGED queued_events
 	/\ UNCHANGED removed_nodes
 	/\ UNCHANGED queued_fetches
 	/\ UNCHANGED fetched
 	/\ UNCHANGED delete_count
 
+(*
+1. we remove the current target from the function list
+2. we remove the current target from the parent's children
+3. we recursively call nodeRemoveInner on each of the children of the target
+4. we return the new
+*)
+
+RECURSIVE removeNodeAndChildren(_, _, _)
+
+removeNodeAndChildren(nodelist, siblings, idx) == IF idx <= Len(siblings) THEN
+	LET
+		target == siblings[idx]
+		withNextSiblingsRemoved == removeNodeAndChildren(nodelist, siblings, idx + 1)
+		withChildrenRemoved == LET
+			targetChildren == nodelist[target].children
+		IN
+			IF Len(targetChildren) > 0 THEN
+				removeNodeAndChildren(withNextSiblingsRemoved, targetChildren, 1)
+			ELSE
+				nodelist
+		withTargetRemoved == [
+			k \in (DOMAIN withChildrenRemoved \ {target}) |-> withChildrenRemoved[k]
+		]
+	IN
+		withTargetRemoved
+ELSE
+	nodelist
+
 \* node removed somewhere in the tree (excluding root)
 NodeRemove ==
 	/\ delete_count < MAX_DELETIONS
-	/\ \E parent \in DOMAIN nodes : Len(nodes[parent].children) > 0 /\ LET
-			target == CHOOSE n \in TupleSet(nodes[parent].children) : TRUE
-			without_target == [k \in (DOMAIN nodes \ {target}) |-> nodes[k]]
-		IN
-			/\ nodes' = [without_target EXCEPT
-				![parent] = [without_target[parent] EXCEPT
-					!.children = SelectSeq(without_target[parent].children, LAMBDA x : x /= target)]]
+	/\ \E parent \in DOMAIN nodes :
+		/\ Len(nodes[parent].children) > 0
+		/\ \E target \in TupleSet(nodes[parent].children) :
+			/\ nodes' = [
+					removeNodeAndChildren(nodes, << target >>, 1) EXCEPT
+					![parent] = [@ EXCEPT !.children = SelectSeq(@, LAMBDA child : child /= target)]
+				]
 			/\ queued_events' = IF parent \in fetched THEN Append(queued_events, parent) ELSE queued_events
 			/\ removed_nodes' = removed_nodes \cup {target}
 			/\ delete_count' = delete_count + 1
@@ -128,7 +137,7 @@ RecvEvent == Len(queued_events) > 0 /\ LET
 	event == Head(queued_events)
 IN
 	/\ queued_events' = Tail(queued_events)
-	/\ queued_fetches' = queued_fetches \o SelectSeq(event.children, LAMBDA x : x \in fetched)
+	/\ queued_fetches' = queued_fetches \o SelectSeq(event.children, LAMBDA x : ~(x \in fetched))
 	/\ UNCHANGED nodes
 	/\ UNCHANGED fetched
 	/\ UNCHANGED removed_nodes
@@ -153,16 +162,21 @@ Next ==
 	\/ BrowserHandleFetch
 	\/ UNCHANGED vars
 
-AllInsertedFetched ==
-	DOMAIN nodes = fetched
+PropNoOrphansOutsideRoot ==
+	[](Cardinality({ child \in DOMAIN nodes :
+		~\E parent \in DOMAIN nodes :
+		child \in TupleSet(nodes[parent].children)
+	}) = 1)
 
-NoMissingNodes ==
-	DOMAIN nodes \cup removed_nodes = POSSIBLE_IDS
+PropAllNodesUsed ==
+	<>(DOMAIN nodes \cup removed_nodes = POSSIBLE_IDS)
+
+PropAllInsertedFetched ==
+	<>(DOMAIN nodes = fetched)
 
 Spec ==
 	/\ Init
 	/\ [][Next]_vars
-	/\ []NoMissingNodes
-	/\ <>AllInsertedFetched
+	/\ SF_vars(Next) \* strong-fairness, Next must occur infinitely if it is enabled infinitely
 
 ====
