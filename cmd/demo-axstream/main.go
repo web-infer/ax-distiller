@@ -4,6 +4,7 @@ import (
 	"ax-distiller/internal/chrome"
 	"ax-distiller/internal/chrome/axstream"
 	"ax-distiller/internal/chrome/fastclient"
+	"ax-distiller/internal/structure"
 	"context"
 	"log/slog"
 	"os"
@@ -71,18 +72,18 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	// persistent := structure.NewPersistent()
+	persistent := structure.NewPersistent()
 
 	events := make(chan axstream.Event)
 	go func() {
 		for e := range events {
 			switch e.Type {
 			case axstream.EVENT_REPLACE:
-				// if persistent.Root != nil {
-				// 	slog.Info("event replace root", "hash", persistent.Root.Hash)
-				// } else {
-				slog.Info("event replace root")
-				// }
+				if persistent.Root != nil {
+					slog.Info("event replace root", "hash", persistent.Root.Hash)
+				} else {
+					slog.Info("event replace root")
+				}
 			case axstream.EVENT_INSERT:
 				if e.ID != nil {
 					slog.Info("event insert", "prev_sibling", *e.ID, "id", e.Subtree.BackendDOMNodeID)
@@ -93,7 +94,7 @@ func main() {
 				slog.Info("event remove", "id", *e.ID)
 			}
 
-			// persistent.HandleEvent(e)
+			persistent.HandleEvent(e)
 		}
 	}()
 
