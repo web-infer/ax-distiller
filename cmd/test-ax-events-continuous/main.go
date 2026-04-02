@@ -65,6 +65,14 @@ func main() {
 		}
 	}()
 
+	pool := sync.Pool{
+		New: func() any {
+			return &cdp.AXNodesResult{
+				Nodes: make([]cdp.AXNode, 0),
+			}
+		},
+	}
+
 	subctx, cancel := context.WithCancel(ctx)
 	subscriptions := make(chan proto.AccessibilityAXNodeID)
 	reset := func() {
@@ -92,9 +100,10 @@ func main() {
 
 					// this is purely for subscribing, we do not use the result
 					// of this command
-					res, err := cdp.Command(subctx, page, cdp.GetChildAXNodes{
+					res := pool.Get().(*cdp.AXNodesResult)
+					err := cdp.CommandOutputPtr(subctx, page, cdp.GetChildAXNodes{
 						ID: target,
-					})
+					}, res)
 					if err != nil {
 						// we ignore errors, they do not affect the result
 						continue
@@ -112,6 +121,7 @@ func main() {
 						}
 						fetchedMutex.Unlock()
 					}
+					pool.Put(res)
 					timer.Reset(time.Second)
 				}
 			}
