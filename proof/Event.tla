@@ -21,6 +21,7 @@ algo is considered correct if: eventually, all inserted (non-deleted) nodes
 will have been fetched
 *)
 
+CONSTANT ROOT_ID
 CONSTANT POSSIBLE_IDS
 CONSTANT MAX_DELETE_ACTIONS
 
@@ -47,13 +48,8 @@ vars == <<
 >>
 
 Init ==
-	/\ LET
-			\* CHOOSE is used here because it doesn't really matter what ID
-			\* value we set the root to
-			root == CHOOSE r \in POSSIBLE_IDS : TRUE
-		IN
-			/\ nodes = [k \in {root} |-> [id |-> k, children |-> << >>]]
-			/\ fetched = {}
+	/\ nodes = [k \in {ROOT_ID} |-> [id |-> k, children |-> << >>]]
+	/\ fetched = {}
 	/\ removed_nodes = {}
 	/\ queued_events = << >>
 	/\ queued_fetches = << >>
@@ -174,11 +170,11 @@ Next ==
 	\/ BrowserHandleFetch
 	\/ UNCHANGED vars
 
-PropNoOrphansOutsideRoot ==
-	[](Cardinality({ child \in DOMAIN nodes :
+NoOrphansOutsideRoot ==
+	Cardinality({ child \in DOMAIN nodes :
 		~\E parent \in DOMAIN nodes :
 		child \in TupleSet(nodes[parent].children)
-	}) = 1)
+	}) = 1
 
 PropAllNodesUsed ==
 	<>(DOMAIN nodes \cup removed_nodes = POSSIBLE_IDS)
@@ -189,6 +185,8 @@ PropAllInsertedFetched ==
 Spec ==
 	/\ Init
 	/\ [][Next]_vars
-	/\ SF_vars(Next) \* strong-fairness, Next must occur infinitely if it is enabled infinitely
+	/\ SF_vars(Next) \* strong-fairness, Next must occur infinitely if it is
+	\* enabled infinitely, effectively prevents "crashing" (where the system
+	\* stutters forever without ever reaching the next action)
 
 ====
