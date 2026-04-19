@@ -40,7 +40,7 @@ const (
 type TreeMutation struct {
     ParentID int64
     Type MutationType
-    Nodes []*AXNode
+    Nodes []AXNode
 }
 ```
 

@@ -334,7 +334,7 @@ func Construct(current *cdp.AXNodeWithRelatives) (ret *Structure) {
 func (s *Structure) Debug() tree.DebugInfo {
 	meta := s.Underlying.Role.Value
 	return tree.DebugInfo{
-		Name:     fmt.Sprintf("%v (%v)", s.Hash, s.Underlying.BackendDOMNodeID),
+		Name:     fmt.Sprintf("%v (%v)", s.Hash, s.Underlying.BackendDOMNodeID, s.Underlying.Ignored),
 		Metadata: meta,
 	}
 }

@@ -3,10 +3,10 @@ package axstream
 import (
 	"ax-distiller/internal/chrome/cdp"
 	"context"
-	"fmt"
 	"log/slog"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/bytedance/sonic"
 	"github.com/go-rod/rod"
@@ -41,17 +41,17 @@ type Event struct {
 	Subtree *cdp.AXNodeWithRelatives
 }
 
+// performance tuning
+const (
+	sub_worker_count        = 8
+	sub_channel_buffer_size = 8
+	out_channel_buffer_size = 8
+)
+
 const (
 	event_dom_childNodeRemoved  = "DOM.childNodeRemoved"
 	event_dom_childNodeInserted = "DOM.childNodeInserted"
 	event_ax_loadComplete       = "Accessibility.loadComplete"
-)
-
-type workerState uint8
-
-const (
-	worker_init workerState = iota
-	worker_hydrated
 )
 
 func isInvalidNodeCDPErr(err error) bool {
@@ -60,270 +60,202 @@ func isInvalidNodeCDPErr(err error) bool {
 		strings.Contains(err.Error(), "No node found")
 }
 
-func Listen(ctx context.Context, out chan<- Event, page *rod.Page) (err error) {
+type listenContext struct {
+	out           chan<- Event
+	page          *rod.Page
+	ctx           context.Context
+	subctx        context.Context
+	cancel        func()
+	nodesMutex    sync.Mutex
+	nodes         map[proto.AccessibilityAXNodeID]cdp.AXNode
+	pool          sync.Pool
+	subscriptions chan proto.AccessibilityAXNodeID
+}
+
+func newListenContext(ctx context.Context, out chan<- Event, page *rod.Page) *listenContext {
+	subctx, cancel := context.WithCancel(ctx)
+	return &listenContext{
+		out:        out,
+		page:       page,
+		ctx:        ctx,
+		nodesMutex: sync.Mutex{},
+		nodes:      make(map[proto.AccessibilityAXNodeID]cdp.AXNode),
+		subctx:     subctx,
+		cancel:     cancel,
+		pool: sync.Pool{
+			New: func() any {
+				return &cdp.AXNodesResult{
+					Nodes: make([]cdp.AXNode, 0),
+				}
+			},
+		},
+		subscriptions: make(chan proto.AccessibilityAXNodeID, sub_channel_buffer_size),
+	}
+}
+
+func (c *listenContext) ResetPage() {
+	c.cancel()
+drain:
+	for {
+		select {
+		case <-c.subscriptions:
+		default:
+			break drain
+		}
+	}
+	c.subctx, c.cancel = context.WithCancel(c.ctx)
+}
+
+func (c *listenContext) subscribeWorker() {
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case target := <-c.subscriptions:
+			if c.subctx.Err() != nil {
+				continue
+			}
+
+			// this is purely for subscribing, we do not use the result
+			// of this command
+			res := c.pool.Get().(*cdp.AXNodesResult)
+			err := cdp.CommandOutputPtr(c.subctx, c.page, cdp.GetChildAXNodes{
+				ID: target,
+			}, res)
+			if err != nil {
+				// we ignore errors, they do not affect the result
+				continue
+			}
+
+			for i, child := range res.Nodes {
+				c.nodesMutex.Lock()
+				_, alreadyFetched := c.nodes[child.NodeID]
+				c.nodes[child.NodeID] = res.Nodes[i]
+				if !alreadyFetched {
+					// this must be done in a goroutine because otherwise we
+					// could have a deadlock:
+					//
+					// 1. total workers: A and B, both awaiting work
+					// 2. A receives work from channel, has 2 children (job jA.1, jA.2)
+					// 3. B receives job jA.1
+					// 4. A is waiting on channel <- jA.2
+					// 5. B finishes job jA.1, has 2 children (jB.1, jB.2)
+					// 6. B is waiting on channel <- jB.1
+					// 7. A and B are both waiting on channel send, no
+					//    goroutines are available to receive those channel
+					//    sends
+					// 8. we have a deadlock
+					//
+					// we cannot use select { case ...: default: } because if
+					// it takes the default branch, it effectively drops the
+					// job, which cannot happen
+					//
+					// technically we haven't solved the deadlock here, just
+					// moved it so that it happens if we run out of memory from
+					// creating goroutines, but such a case is quite unlikely
+					//
+					// the subscription ordering here also doesn't matter
+					// (since the only ordering that matters is the actual
+					// events the browser sends to us, not subscriptions which
+					// is only dependent on the node's id) so it is okay to
+					// create goroutines like this
+					go func() {
+						c.subscriptions <- child.NodeID
+					}()
+				}
+				c.nodesMutex.Unlock()
+			}
+
+			c.pool.Put(res)
+		}
+	}
+}
+
+func (c *listenContext) eventWorker() {
+	events := c.page.Event()
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case msg := <-events:
+			method := msg.Method
+			buff := reflect.ValueOf(msg).Elem().FieldByName("data").Bytes()
+
+			switch method {
+			case "Accessibility.loadComplete":
+				c.ResetPage()
+				var event struct {
+					Root cdp.AXNode `json:"root"`
+				}
+				err := sonic.Unmarshal(buff, &event)
+				if err != nil {
+					panic(err)
+				}
+
+				// fetch root & reset state
+				c.nodesMutex.Lock()
+				clear(c.nodes)
+				c.nodes[event.Root.NodeID] = event.Root
+				c.nodesMutex.Unlock()
+
+				c.subscriptions <- event.Root.NodeID
+
+				// TODO: remove debugging
+				slog.Info("Accessibility.loadComplete", "root", event.Root.BackendDOMNodeID)
+			case "Accessibility.nodesUpdated":
+				var nodes cdp.AXNodesResult
+				err := sonic.Unmarshal(buff, &nodes)
+				if err != nil {
+					panic(err)
+				}
+
+				// fetch non-fetched nodes & update all nodes given
+				for i, n := range nodes.Nodes {
+					c.nodesMutex.Lock()
+					_, alreadyFetched := c.nodes[n.NodeID]
+					c.nodes[n.NodeID] = nodes.Nodes[i]
+					c.nodesMutex.Unlock()
+
+					if !alreadyFetched {
+						c.subscriptions <- n.NodeID
+					}
+				}
+
+				// TODO: remove debugging
+				slog.Info("Accessibility.nodesUpdated", "nodes", len(nodes.Nodes))
+			}
+		}
+	}
+}
+
+func Listen(ctx context.Context, page *rod.Page) (out <-chan Event, err error) {
 	page = page.Context(ctx)
 
-	type pageEvent struct {
-		method string
-		buff   []byte
-	}
-
-	err = cdp.CommandUnary(ctx, page, proto.DOMEnable{})
-	if err != nil {
-		return
-	}
 	err = cdp.CommandUnary(ctx, page, proto.AccessibilityEnable{})
 	if err != nil {
 		return
 	}
 
-	pageEvents := page.Event()
-	go func() {
-		var state workerState
-		frontBackMap := newDOMFrontendBackendLookup()
+	events := make(chan Event, out_channel_buffer_size)
+	out = events
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case msg := <-pageEvents:
-				method := msg.Method
-				buff := reflect.ValueOf(msg).Elem().FieldByName("data").Bytes()
+	listenCtx := newListenContext(ctx, events, page)
+	for range sub_worker_count {
+		// this is a worker that is in charge of subscribing to newly found
+		// discovered nodes from events
+		go listenCtx.subscribeWorker()
+	}
+	// we do not spawn multiple event workers because events must be handled in
+	// order (ex. some node is deleted and re-inserted with a different tree,
+	// if this ordering is corrupted catastrophic results will follow)
+	//
+	// we avoid blockage by async/IO operations by sending them all into the
+	// subscription worker goroutines and buffering the channel to avoid being
+	// blocked by channel write, this also naturally functions as a
+	// backpressure mechanism (to stop event loop from sending more work to the
+	// subscription workers if they cannot keep up & prevent potential memory
+	// usage skyrocketing)
+	go listenCtx.eventWorker()
 
-				switch method {
-				case event_ax_loadComplete, event_dom_childNodeInserted, event_dom_childNodeRemoved:
-					switch method {
-					case event_ax_loadComplete:
-						switch state {
-						case worker_init, worker_hydrated:
-							var ev struct {
-								Root struct {
-									BackendNodeID proto.DOMBackendNodeID `json:"backendDOMNodeId"`
-								}
-							}
-							err := sonic.ConfigFastest.Unmarshal(buff, &ev)
-							if err != nil {
-								panic(err)
-							}
-
-							// fetch full AX tree
-							root, err := cdp.GetSubtree(ctx, page, ev.Root.BackendNodeID, cdp.GetAXTreeOptions{})
-							if err != nil {
-								if isInvalidNodeCDPErr(err) {
-									// stale event, abort
-									break
-								}
-								panic(err)
-							}
-
-							// touch whole DOM to subscribe to all DOM elements
-							pDepth := -1
-							doc, err := cdp.Command(ctx, page, cdp.DOMGetDocument{
-								Depth:  &pDepth,
-								Pierce: true,
-							})
-							if err != nil {
-								if isInvalidNodeCDPErr(err) {
-									// stale event, abort
-									break
-								}
-								panic(err)
-							}
-
-							// map all frontend ids to backend dom node ids
-							frontBackMap.Reset()
-							frontBackMap.Index(doc.Root)
-
-							out <- Event{
-								Type:    EVENT_REPLACE,
-								Subtree: root,
-							}
-							state = worker_hydrated
-						}
-					case event_dom_childNodeInserted:
-						switch state {
-						case worker_init:
-							slog.Warn("invalid state: childNodeInserted happened before hydration!")
-						case worker_hydrated:
-							var params proto.DOMChildNodeInserted
-							err := sonic.ConfigFastest.Unmarshal(buff, &params)
-							if err != nil {
-								panic(err)
-							}
-
-							// we lookup the modified parent and the previous sibling
-							// which the inserted node is after
-							parent, err := cdp.Command(ctx, page, cdp.DOMGetBackendNodeID{
-								NodeID: &params.ParentNodeID,
-							})
-							if err != nil {
-								if isInvalidNodeCDPErr(err) {
-									break
-								}
-								panic(err)
-							}
-							parentID := parent.Node.BackendNodeID
-							// _, ok := frontBackMap.Lookup(params.ParentNodeID)
-							// if !ok {
-							// 	fmt.Println(parentID)
-							// 	panic("assert failed: parent doesn't exist")
-							// }
-
-							var prevSiblingID *proto.DOMBackendNodeID
-							// 0 indicates the node is the first child of the parent
-							if params.PreviousNodeID != 0 {
-								// _, ok := frontBackMap.Lookup(params.PreviousNodeID)
-								// if !ok {
-								// 	fmt.Println(params.PreviousNodeID)
-								// 	panic("assert failed: prevSibling doesn't exist")
-								// }
-								// we lookup the modified parent and the previous sibling
-								// which the inserted node is after
-								prevSibling, err := cdp.Command(ctx, page, cdp.DOMGetBackendNodeID{
-									NodeID: &params.PreviousNodeID,
-								})
-								if err != nil {
-									if isInvalidNodeCDPErr(err) {
-										// if could not find node the event itself was
-										// talking about, then it likely means this
-										// event is now stale, we should drop any
-										// additional processing
-										break
-									}
-									panic(err)
-								}
-								prevSiblingID = &prevSibling.Node.BackendNodeID
-							}
-
-							// we fetch the subtree of the newly inserted node
-							subtree, err := cdp.GetSubtree(
-								ctx,
-								page,
-								proto.DOMBackendNodeID(params.Node.BackendNodeID),
-								cdp.GetAXTreeOptions{},
-							)
-							if err != nil {
-								if isInvalidNodeCDPErr(err) {
-									// stale event, abort
-									break
-								}
-								panic(err)
-							}
-
-							// we touch all the DOM nodes to subscribe to their events & index
-							pDepth := -1
-							desc, err := cdp.Command(ctx, page, cdp.DOMDescribeNode{
-								NodeID: &params.Node.NodeID,
-								Depth:  &pDepth,
-								Pierce: true,
-							})
-							if err != nil {
-								if isInvalidNodeCDPErr(err) {
-									// stale event, abort
-									break
-								}
-								panic(err)
-							}
-							frontBackMap.Index(desc.Node)
-
-							out <- Event{
-								Type:     EVENT_INSERT,
-								ParentID: parentID,
-								ID:       prevSiblingID,
-								Subtree:  subtree,
-							}
-						}
-					case event_dom_childNodeRemoved:
-						switch state {
-						case worker_init:
-							slog.Warn("invalid state: childNodeInserted happened before hydration!")
-						case worker_hydrated:
-							var params proto.DOMChildNodeRemoved
-							err := sonic.ConfigFastest.Unmarshal(buff, &params)
-							if err != nil {
-								panic(err)
-							}
-							backendNodeID, ok := frontBackMap.Lookup(params.NodeID)
-							if !ok {
-								// stale event, abort
-								break
-							}
-							frontBackMap.DeIndex(params.NodeID)
-							out <- Event{
-								Type: EVENT_REMOVE,
-								ID:   &backendNodeID,
-							}
-						}
-					default:
-						panic(fmt.Sprintf("unknown method: %v", method))
-					}
-				}
-			}
-		}
-	}()
 	return
-}
-
-// domFrontendBackendLookup keeps track of a mapping from frontend DOM node IDs
-// to backend DOM node IDs. This is because DOM events only provide frontend
-// IDs and AX commands only provide backend IDs.
-//
-// Note: this is not thread-safe.
-type domFrontendBackendLookup struct {
-	records map[proto.DOMNodeID]domBackendRecord
-}
-
-type domBackendRecord struct {
-	id proto.DOMBackendNodeID
-	// we store children so that deindexing is faster later
-	firstChild  proto.DOMNodeID
-	nextSibling proto.DOMNodeID
-}
-
-func newDOMFrontendBackendLookup() domFrontendBackendLookup {
-	return domFrontendBackendLookup{
-		records: map[proto.DOMNodeID]domBackendRecord{},
-	}
-}
-
-func (l domFrontendBackendLookup) Lookup(frontendID proto.DOMNodeID) (proto.DOMBackendNodeID, bool) {
-	rec, ok := l.records[frontendID]
-	if !ok {
-		return 0, false
-	}
-	return rec.id, true
-}
-
-func (l domFrontendBackendLookup) indexInner(siblings []*cdp.DOMNode) proto.DOMNodeID {
-	if len(siblings) == 0 {
-		return -1
-	}
-	node := siblings[0]
-	firstChildID := l.indexInner(node.Children)
-	nsID := l.indexInner(siblings[1:])
-	l.records[node.NodeID] = domBackendRecord{
-		id:          node.BackendNodeID,
-		firstChild:  firstChildID,
-		nextSibling: nsID,
-	}
-	return node.NodeID
-}
-
-func (l domFrontendBackendLookup) Index(root *cdp.DOMNode) proto.DOMNodeID {
-	return l.indexInner([]*cdp.DOMNode{root})
-}
-
-func (l domFrontendBackendLookup) DeIndex(root proto.DOMNodeID) {
-	// if id == 0, it doesn't have children or a valid id
-	if root <= 0 {
-		return
-	}
-	rec := l.records[root]
-	delete(l.records, root)
-	l.DeIndex(rec.firstChild)
-	l.DeIndex(rec.nextSibling)
-}
-
-func (l domFrontendBackendLookup) Reset() {
-	clear(l.records)
 }

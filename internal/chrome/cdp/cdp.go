@@ -16,7 +16,7 @@ type Request[T any] interface {
 	Call(proto.Client) (*T, error)
 }
 
-func Command[I Request[O], O any](ctx context.Context, page *rod.Page, req I) (res O, err error) {
+func CommandOutputPtr[I Request[O], O any](ctx context.Context, page *rod.Page, req I, res *O) (err error) {
 	if ctx == context.TODO() {
 		ctx = page.GetContext()
 	}
@@ -25,11 +25,16 @@ func Command[I Request[O], O any](ctx context.Context, page *rod.Page, req I) (r
 		err = fmt.Errorf("%s: %w", req.ProtoReq(), err)
 		return
 	}
-	err = sonic.ConfigFastest.Unmarshal(resBuff, &res)
+	err = sonic.ConfigFastest.Unmarshal(resBuff, res)
 	if err != nil {
 		err = fmt.Errorf("%s: %w", req.ProtoReq(), err)
 		return
 	}
+	return
+}
+
+func Command[I Request[O], O any](ctx context.Context, page *rod.Page, req I) (res O, err error) {
+	err = CommandOutputPtr(ctx, page, req, &res)
 	return
 }
 

@@ -43,7 +43,6 @@ func (p Persistent) HandleEvent(e axstream.Event) {
 	case axstream.EVENT_REPLACE:
 		clear(p.mapping)
 		p.Root = Construct(e.Subtree)
-		fmt.Println(p.Root)
 		p.indexStructureBackendIDs(p.Root)
 	case axstream.EVENT_INSERT:
 		// problem: structure is based on non-ignored nodes, however ignored
@@ -65,7 +64,8 @@ func (p Persistent) HandleEvent(e axstream.Event) {
 			parent, ok := p.mapping[e.ParentID]
 			if !ok {
 				slog.Info("info", "parent", e.ParentID)
-				panic(fmt.Errorf("assert failed: parent corresponding to ParentID (%v) must exist", e.ParentID))
+				fmt.Println(fmt.Errorf("assert failed: parent corresponding to ParentID (%v) must exist (persistent)", e.ParentID))
+				return
 			}
 			ns := parent.FirstChild
 			parent.FirstChild = subtreeStruct
@@ -74,7 +74,8 @@ func (p Persistent) HandleEvent(e axstream.Event) {
 			ps, ok := p.mapping[*prevSiblingID]
 			if !ok {
 				slog.Info("info", "id", p.mapping[*prevSiblingID], "parent", e.ParentID)
-				panic(fmt.Errorf("assert failed: previous sibling corresponding to ID (%v) must exist", *prevSiblingID))
+				fmt.Println(fmt.Errorf("assert failed: previous sibling corresponding to ID (%v) must exist (persistent)", *prevSiblingID))
+				return
 			}
 			ns := ps.NextSibling
 			ps.NextSibling = subtreeStruct

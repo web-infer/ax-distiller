@@ -48,18 +48,16 @@ func main() {
 	}
 
 	fetchedMutex := sync.Mutex{}
-	fetched := make(map[proto.AccessibilityAXNodeID]cdp.AXNode)
+	fetched := make(map[proto.AccessibilityAXNodeID]cdp.AXNode, 8)
 
 	subscriptionCount := uint64(0)
-
-	timer := time.NewTimer(time.Second)
+	timer := time.NewTimer(100 * time.Millisecond)
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-timer.C:
-
 				slog.Info("subscriptions", "count", atomic.LoadUint64(&subscriptionCount))
 			}
 		}
@@ -87,7 +85,7 @@ func main() {
 		}
 		subctx, cancel = context.WithCancel(ctx)
 	}
-	for range 4 {
+	for range 8 {
 		go func() {
 			for {
 				select {
@@ -121,8 +119,9 @@ func main() {
 						}
 						fetchedMutex.Unlock()
 					}
+
 					pool.Put(res)
-					timer.Reset(time.Second)
+					timer.Reset(100 * time.Millisecond)
 				}
 			}
 		}()
@@ -153,9 +152,7 @@ func main() {
 				fetched[event.Root.NodeID] = event.Root
 				fetchedMutex.Unlock()
 
-				go func() {
-					subscriptions <- event.Root.NodeID
-				}()
+				subscriptions <- event.Root.NodeID
 
 				// debugging
 				slog.Info("Accessibility.loadComplete", "root", event.Root.BackendDOMNodeID)
@@ -171,9 +168,7 @@ func main() {
 					fetchedMutex.Lock()
 					_, alreadyFetched := fetched[n.NodeID]
 					if !alreadyFetched {
-						go func() {
-							subscriptions <- n.NodeID
-						}()
+						subscriptions <- n.NodeID
 					}
 					fetched[n.NodeID] = nodes.Nodes[i]
 					fetchedMutex.Unlock()

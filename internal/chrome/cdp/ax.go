@@ -13,15 +13,15 @@ type AXNode struct {
 	BackendDOMNodeID proto.DOMBackendNodeID        `json:"backendDOMNodeId"`
 	ChildIDs         []proto.AccessibilityAXNodeID `json:"childIds,omitempty"`
 
-	Ignored  bool          `json:"ignored"`
-	Role     Value[string] `json:"role"`
-	ProtoReq Value[string] `json:"name"`
-	// Description CDPAXValue[string] `json:"description"`
-	// Value       CDPAXValue[any]    `json:"value"`
+	Ignored bool          `json:"ignored"`
+	Role    Value[string] `json:"role"`
+	Name    Value[string] `json:"name"`
+	// Description Value[string] `json:"description"`
+	// Value       Value[any]    `json:"value"`
 }
 
 type AXNodesResult struct {
-	Nodes []*AXNode `json:"nodes"`
+	Nodes []AXNode `json:"nodes"`
 }
 
 // GetFullAXTree (experimental) Fetches the entire accessibility tree for the root Document.
@@ -88,5 +88,5 @@ func (QueryAXTree) ProtoReq() string { return "Accessibility.queryAXTree" }
 func (QueryAXTree) Call(c proto.Client) (out *QueryAXTreeResult, err error) { return }
 
 type QueryAXTreeResult struct {
-	Nodes []*AXNode `json:"nodes"`
+	Nodes []AXNode `json:"nodes"`
 }
