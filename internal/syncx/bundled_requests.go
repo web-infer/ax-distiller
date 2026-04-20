@@ -44,14 +44,13 @@ func NewBundledRequests[ID comparable](ctx context.Context, logger *slog.Logger,
 }
 
 func (s *BundledRequests[ID]) waitRoutine() {
-	defer s.fired.Store(true)
-
 	// wait for all subscriptions to resolve (we wait this first, since
 	// subscriptions can create child requests)
 waitsub:
 	for {
 		select {
 		case <-s.ctx.Done():
+			s.fired.Store(true) // must be set before sending to done
 			s.done <- false
 			return
 		case <-s.req:
@@ -74,6 +73,7 @@ waitsub:
 	for i, childRequest := range s.children {
 		select {
 		case <-s.ctx.Done():
+			s.fired.Store(true) // must be set before sending to done
 			s.done <- false
 			return
 		case <-childRequest:
@@ -84,6 +84,7 @@ waitsub:
 	}
 
 	s.logger.Debug("send done")
+	s.fired.Store(true) // must be set before sending to done
 	s.done <- true
 }
 

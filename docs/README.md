@@ -44,4 +44,5 @@ Chrome (CDP events)
 ## Further Reading
 
 - [Architecture overview](architecture.md)
+- [Agent workflow](agent.md)
 - [Structure and hashing](structures.md)
