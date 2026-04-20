@@ -50,7 +50,7 @@ func (l listener) handleSubscribe(req subReq) {
 	}
 	// we are guaranteed len(childTargets) > 0
 
-	childBundle := syncx.NewBundledRequests(l.treeState.PageContext(), childTargets)
+	childBundle := syncx.NewBundledRequests(l.treeState.PageContext(), l.logger, childTargets)
 	go func() {
 		defer childBundle.Cleanup()
 		<-childBundle.Done()

@@ -4,7 +4,6 @@ import (
 	"ax-distiller/internal/chrome/cdp"
 	"ax-distiller/internal/syncx"
 	"fmt"
-	"log/slog"
 	"reflect"
 
 	"github.com/bytedance/sonic"
@@ -14,7 +13,7 @@ import (
 var eventLoopNoStale = fmt.Errorf("page should never become stale within the single event loop goroutine")
 
 func (l listener) handleAXLoadComplete(eventBuff []byte) {
-	slog.Debug("Accessibility.loadComplete")
+	l.logger.Debug("start event handle", "event", "Accessibility.loadComplete")
 
 	var event struct {
 		Root cdp.AXNode `json:"root"`
@@ -27,7 +26,7 @@ func (l listener) handleAXLoadComplete(eventBuff []byte) {
 	l.treeState.PageReset(event.Root)
 
 	targets := []proto.AccessibilityAXNodeID{event.Root.NodeID}
-	bundle := syncx.NewBundledRequests(l.treeState.PageContext(), targets)
+	bundle := syncx.NewBundledRequests(l.treeState.PageContext(), l.logger, targets)
 	defer bundle.Cleanup()
 	l.subs <- subReq{
 		pageID: l.treeState.PageID(),
@@ -38,7 +37,7 @@ func (l listener) handleAXLoadComplete(eventBuff []byte) {
 	ok := <-bundle.Done()
 	if !ok {
 		// if bundle context has canceled (the page has reset)
-		slog.Debug("Accessibility.loadComplete: bundle context canceled")
+		l.logger.Debug("bundle context canceled", "event", "Accessibility.loadComplete")
 		return
 	}
 
@@ -48,7 +47,7 @@ func (l listener) handleAXLoadComplete(eventBuff []byte) {
 		panic(eventLoopNoStale)
 	}
 
-	slog.Debug("Accessibility.loadComplete: root complete!")
+	l.logger.Debug("finish event handle", "event", "Accessibility.loadComplete")
 
 	l.events <- Event{
 		Type:  EVENT_RESET,
@@ -57,7 +56,7 @@ func (l listener) handleAXLoadComplete(eventBuff []byte) {
 }
 
 func (l listener) handleNodesUpdated(eventBuff []byte) {
-	slog.Debug("Accessibility.nodesUpdated")
+	l.logger.Debug("start event handle", "event", "Accessibility.nodesUpdated")
 
 	var nodes cdp.AXNodesResult
 	err := sonic.Unmarshal(eventBuff, &nodes)
@@ -85,8 +84,8 @@ func (l listener) handleNodesUpdated(eventBuff []byte) {
 	}
 
 	if len(subTargets) > 0 {
-		slog.Debug("Accessibility.nodesUpdated: bundle start for nodesUpdated")
-		bundle := syncx.NewBundledRequests(l.treeState.PageContext(), subTargets)
+		l.logger.Debug("bundle start", "event", "Accessibility.nodesUpdated")
+		bundle := syncx.NewBundledRequests(l.treeState.PageContext(), l.logger, subTargets)
 		defer bundle.Cleanup()
 
 		pageID := l.treeState.PageID()
@@ -98,10 +97,10 @@ func (l listener) handleNodesUpdated(eventBuff []byte) {
 			}
 		}
 		ok := <-bundle.Done()
-		slog.Debug("Accessibility.nodesUpdated: bundle stop for nodesUpdated")
+		l.logger.Debug("bundle stop", "event", "Accessibility.nodesUpdated")
 		if ok {
 			// bundle context has canceled (the page has reset)
-			slog.Debug("Accessibility.nodesUpdated: bundle context canceled!")
+			l.logger.Debug("bundle context canceled", "event", "Accessibility.nodesUpdated")
 			return
 		}
 	}
@@ -125,7 +124,7 @@ func (l listener) handleNodesUpdated(eventBuff []byte) {
 			panic(eventLoopNoStale)
 		}
 	}
-	slog.Debug("Accessibility.nodesUpdated: notify events")
+	l.logger.Debug("finish event handler", "event", "Accessibility.nodesUpdated")
 	l.events <- ev
 }
 

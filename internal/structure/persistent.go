@@ -2,10 +2,13 @@ package structure
 
 import (
 	"ax-distiller/internal/chrome/axstream"
-	"fmt"
+	"ax-distiller/internal/chrome/cdp"
+	"encoding/binary"
+	"iter"
 	"log/slog"
 
 	"github.com/go-rod/rod/lib/proto"
+	"github.com/zeebo/xxh3"
 )
 
 /*
@@ -40,84 +43,149 @@ given a node AX ID:
 6. save structure under AX ID
 7. return structure
 
+somewhere in here must compute dropped nodes and drop them
 */
 
+type structureEntry struct {
+	Value      *Structure
+	References int
+}
+
 type Persistent struct {
-	Root    *Structure
-	mapping map[proto.DOMBackendNodeID]*Structure
+	Root *Structure
+	// we use the proto.DOMBackendNodeID because it is faster to hash an int
+	state      map[proto.DOMBackendNodeID]*Structure
+	recomputed map[proto.DOMBackendNodeID]*Structure
+	logger     *slog.Logger
 }
 
-func NewPersistent() Persistent {
-	return Persistent{
-		Root:    nil,
-		mapping: make(map[proto.DOMBackendNodeID]*Structure),
+func NewPersistent(logger *slog.Logger) *Persistent {
+	return &Persistent{
+		Root:       nil,
+		state:      make(map[proto.DOMBackendNodeID]*Structure),
+		recomputed: make(map[proto.DOMBackendNodeID]*Structure),
+		logger:     logger.WithGroup("persistent"),
 	}
 }
 
-func (p Persistent) indexStructureBackendIDs(s *Structure) {
-	if s == nil {
+func (p *Persistent) shallowIterNonIgnoredDescendentsInner(node *cdp.AXNodeWithRelatives, yield func(*cdp.AXNodeWithRelatives) bool) {
+	if node == nil {
 		return
 	}
-	p.mapping[s.Underlying.BackendDOMNodeID] = s
-	p.indexStructureBackendIDs(s.FirstChild)
-	p.indexStructureBackendIDs(s.NextSibling)
-}
-
-func (p Persistent) deindexStructureBackendIDs(s *Structure) {
-	if s == nil {
+	if !node.Underlying.Ignored {
+		// we always immediately return when finding non-ignored node,
+		// therefore there is no case where a node with a non-ignored ancestor
+		// is yielded
+		yield(node)
 		return
 	}
-	delete(p.mapping, s.Underlying.BackendDOMNodeID)
-	p.deindexStructureBackendIDs(s.FirstChild)
-	p.deindexStructureBackendIDs(s.NextSibling)
+	p.shallowIterNonIgnoredDescendentsInner(node.FirstChild, yield)
+	p.shallowIterNonIgnoredDescendentsInner(node.NextSibling, yield)
 }
 
-func (p Persistent) HandleEvent(e axstream.Event) {
+func (p *Persistent) shallowIterNonIgnoredDescendents(node *cdp.AXNodeWithRelatives) iter.Seq[*cdp.AXNodeWithRelatives] {
+	return func(yield func(*cdp.AXNodeWithRelatives) bool) {
+		// we do not yield() the node itself
+		p.shallowIterNonIgnoredDescendentsInner(node.FirstChild, yield)
+	}
+}
+
+func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state map[proto.DOMBackendNodeID]*Structure) (out *Structure) {
+	existing, ok := state[node.Underlying.BackendDOMNodeID]
+	if ok {
+		out = existing
+		return
+	}
+
+	out = &Structure{
+		Underlying: &node.Underlying,
+	}
+	hashBuf := []byte(node.Underlying.Role.Value)
+
+	var prev *Structure
+	for child := range p.shallowIterNonIgnoredDescendents(node) {
+		// single child may return multiple children in linked list (via NextSibling)
+		childStructs := p.recomputeNodeStructure(child, state)
+		if prev == nil {
+			// set first child to the first childStruct
+			out.FirstChild = childStructs
+		} else {
+			// set final node of last child's NextSibling to first node of this child
+			prev.NextSibling = childStructs
+		}
+
+		for c := childStructs; c != nil; c = c.NextSibling {
+			// add all children hashes to structure
+			binary.LittleEndian.AppendUint64(hashBuf, c.Hash)
+			// prev points to the last node of the child list returned
+			prev = c
+		}
+	}
+
+	out.Hash = xxh3.Hash(hashBuf)
+
+	// we create synthetic structural wrappers for repeated nodes and patterns
+	// in the children linked list
+	for {
+		// group repeated adjacent nodes into a wrapper
+		out.FirstChild = deleteAdjacent(out.FirstChild)
+
+		// identify most frequent (and among the most frequent the largest)
+		// pattern and replace all instances of it with a wrapper
+		var replaced bool
+		out.FirstChild, replaced = slideWindow(out.FirstChild)
+
+		// rinse and repeat until no patterns are found
+		if !replaced {
+			break
+		}
+	}
+
+	state[node.Underlying.BackendDOMNodeID] = out
+	return
+}
+
+func (p *Persistent) reconcileRecomputed() {
+	for id, next := range p.recomputed {
+		prev, ok := p.state[id]
+
+		// if update
+		if ok {
+			// delete all previous children from map which are not in recomputed node's children
+		cleanup:
+			for prevChild := prev.FirstChild; prevChild != nil; prevChild = prevChild.NextSibling {
+				for nextChild := next.FirstChild; nextChild != nil; nextChild = nextChild.NextSibling {
+					if nextChild.Underlying.BackendDOMNodeID == prevChild.Underlying.BackendDOMNodeID {
+						continue cleanup
+					}
+				}
+				p.logger.Debug("delete dropped", "node", prevChild.Underlying.BackendDOMNodeID)
+				delete(p.state, prevChild.Underlying.BackendDOMNodeID)
+			}
+		}
+
+		p.logger.Debug("update node", "node", next.Underlying.BackendDOMNodeID)
+		p.state[id] = next
+	}
+	clear(p.recomputed)
+}
+
+func (p *Persistent) HandleEvent(e axstream.Event) {
 	switch e.Type {
 	case axstream.EVENT_RESET:
-		clear(p.mapping)
-		p.Root = Construct(e.Added[0])
-		p.indexStructureBackendIDs(p.Root)
+		p.logger.Debug("start reset event")
+		clear(p.state)
+		p.Root = p.recomputeNodeStructure(e.Added[0], p.state)
+		p.logger.Debug("finish reset event")
 	case axstream.EVENT_PATCH:
-		// problem: structure is based on non-ignored nodes, however ignored
-		// nodes may be the ones getting updated
-
-		// furthermore, the api simply doesn't return ignored nodes, so we need
-		// a method to "find" non-ignored nodes from ignored nodes
-
-		// for insert we can lookup the shallowest non-ignored ancestor and use
-		// that as the parent, then we splat it, the closest node
-
-		// maybe we can do an on-demand lookup of an inserted event's subtree
-		// and find the shallowest non-ignored nodes (if it is not found
-		// conventionally) for removal
-
-		subtreeStruct := Construct(e.Subtree)
-		prevSiblingID := e.ID
-		if prevSiblingID == nil {
-			parent, ok := p.mapping[e.ParentID]
-			if !ok {
-				slog.Info("info", "parent", e.ParentID)
-				fmt.Println(fmt.Errorf("assert failed: parent corresponding to ParentID (%v) must exist (persistent)", e.ParentID))
-				return
-			}
-			ns := parent.FirstChild
-			parent.FirstChild = subtreeStruct
-			subtreeStruct.NextSibling = ns
-		} else {
-			ps, ok := p.mapping[*prevSiblingID]
-			if !ok {
-				slog.Info("info", "id", p.mapping[*prevSiblingID], "parent", e.ParentID)
-				fmt.Println(fmt.Errorf("assert failed: previous sibling corresponding to ID (%v) must exist (persistent)", *prevSiblingID))
-				return
-			}
-			ns := ps.NextSibling
-			ps.NextSibling = subtreeStruct
-			subtreeStruct.NextSibling = ns
+		p.logger.Debug("start patch event")
+		for _, added := range e.Added {
+			p.recomputeNodeStructure(added, p.state)
 		}
-		p.indexStructureBackendIDs(subtreeStruct)
-	case axstream.EVENT_REMOVE:
-		s := p.mapping[*e.ID]
-		p.deindexStructureBackendIDs(s)
+		for _, updated := range e.Updated {
+			p.recomputeNodeStructure(updated, p.state)
+		}
+		p.reconcileRecomputed()
+		p.logger.Debug("finish patch event")
 	}
 }

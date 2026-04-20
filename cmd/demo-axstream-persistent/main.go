@@ -4,7 +4,10 @@ import (
 	"ax-distiller/internal/chrome"
 	"ax-distiller/internal/chrome/axstream"
 	"ax-distiller/internal/chrome/fastclient"
+	"ax-distiller/internal/slogx"
+	"ax-distiller/internal/structure"
 	"context"
+	"iter"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -12,7 +15,9 @@ import (
 	"github.com/go-rod/rod"
 	rodcdp "github.com/go-rod/rod/lib/cdp"
 	"github.com/go-rod/rod/lib/launcher"
-	"github.com/lmittmann/tint"
+
+	"net/http"
+	_ "net/http/pprof"
 )
 
 func NewTestBrowser(chromeBin string) (browser *rod.Browser, err error) {
@@ -59,10 +64,17 @@ func NewTestBrowser(chromeBin string) (browser *rod.Browser, err error) {
 }
 
 func main() {
-	logger := slog.New(tint.NewHandler(os.Stderr, &tint.Options{
-		Level: slog.LevelInfo,
-	}))
-	slog.SetDefault(logger)
+	go func() {
+		http.ListenAndServe("localhost:6060", nil)
+	}()
+
+	logger := slogx.DemoLogger(slog.LevelDebug, func(group string, attrs iter.Seq[slog.Attr]) bool {
+		switch group {
+		case "main", "persistent":
+			return true
+		}
+		return false
+	})
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
@@ -74,21 +86,24 @@ func main() {
 	p := browser.MustPage("about:blank")
 	chrome.DisableUnusedCDP(p)
 
-	events, err := axstream.Listen(ctx, p)
+	events, err := axstream.Listen(ctx, logger, p)
 	if err != nil {
 		panic(err)
 	}
+
+	persistent := structure.NewPersistent(logger)
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case e := <-events:
+				persistent.HandleEvent(e)
 				switch e.Type {
 				case axstream.EVENT_RESET:
-					slog.Info("reset")
+					logger.Info("page reset", "root", persistent.Root.Hash)
 				case axstream.EVENT_PATCH:
-					slog.Info("patch", "added", len(e.Added), "updated", len(e.Updated))
+					logger.Info("page updated")
 				}
 			}
 		}

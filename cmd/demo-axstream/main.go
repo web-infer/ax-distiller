@@ -4,7 +4,9 @@ import (
 	"ax-distiller/internal/chrome"
 	"ax-distiller/internal/chrome/axstream"
 	"ax-distiller/internal/chrome/fastclient"
+	"ax-distiller/internal/slogx"
 	"context"
+	"iter"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -12,7 +14,6 @@ import (
 	"github.com/go-rod/rod"
 	rodcdp "github.com/go-rod/rod/lib/cdp"
 	"github.com/go-rod/rod/lib/launcher"
-	"github.com/lmittmann/tint"
 )
 
 func NewTestBrowser(chromeBin string) (browser *rod.Browser, err error) {
@@ -59,11 +60,9 @@ func NewTestBrowser(chromeBin string) (browser *rod.Browser, err error) {
 }
 
 func main() {
-	logger := slog.New(tint.NewHandler(os.Stderr, &tint.Options{
-		Level: slog.LevelInfo,
-	}))
-	slog.SetDefault(logger)
-
+	logger := slogx.DemoLogger(slog.LevelInfo, func(group string, attrs iter.Seq[slog.Attr]) bool {
+		return group == "main"
+	})
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
@@ -74,7 +73,7 @@ func main() {
 	p := browser.MustPage("about:blank")
 	chrome.DisableUnusedCDP(p)
 
-	events, err := axstream.Listen(ctx, p)
+	events, err := axstream.Listen(ctx, logger, p)
 	if err != nil {
 		panic(err)
 	}
@@ -86,9 +85,9 @@ func main() {
 			case e := <-events:
 				switch e.Type {
 				case axstream.EVENT_RESET:
-					slog.Info("reset")
+					logger.Info("reset")
 				case axstream.EVENT_PATCH:
-					slog.Info("patch", "added", len(e.Added), "updated", len(e.Updated))
+					logger.Info("patch", "added", len(e.Added), "updated", len(e.Updated))
 				}
 			}
 		}

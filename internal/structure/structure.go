@@ -5,7 +5,6 @@ import (
 	"ax-distiller/internal/tree"
 	"encoding/binary"
 	"fmt"
-	"unique"
 
 	"github.com/elliotchance/orderedmap/v3"
 	"github.com/zeebo/xxh3"
@@ -25,8 +24,6 @@ type Structure struct {
 	FirstChild  *Structure
 	NextSibling *Structure
 }
-
-var synthetic_list_role = unique.Make("SYNTHETIC_LIST")
 
 // this removes adjacent letters and replaces it with a reference:
 // AABCCC -> A'B'C'
@@ -94,8 +91,6 @@ func deleteAdjacent(start *Structure) (ret *Structure) {
 
 	return
 }
-
-var synthetic_object_role = unique.Make("SYNTHETIC_OBJECT")
 
 // this replaces the most frequent pattern with a reference
 // ABABC -> R_1 R_1 C (R_1 = AB)
@@ -269,8 +264,7 @@ func convertToStructure(start *cdp.AXNodeWithRelatives) (ret *Structure) {
 
 		newNode is created for each cur
 
-		this is because Construct may return multiple nodes, they must be
-		conjoined properly
+		this is because Construct may return multiple nodes, they must be conjoined properly
 	*/
 
 	var prev *Structure
@@ -345,7 +339,7 @@ func Construct(current *cdp.AXNodeWithRelatives) (ret *Structure) {
 func (s *Structure) Debug() tree.DebugInfo {
 	meta := s.Underlying.Role.Value
 	return tree.DebugInfo{
-		Name:     fmt.Sprintf("%v (%v)", s.Hash, s.Underlying.BackendDOMNodeID, s.Underlying.Ignored),
+		Name:     fmt.Sprintf("%v (%v) [%v]", s.Hash, s.Underlying.BackendDOMNodeID, s.Underlying.Ignored),
 		Metadata: meta,
 	}
 }

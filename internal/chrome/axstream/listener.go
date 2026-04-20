@@ -3,6 +3,7 @@ package axstream
 import (
 	"ax-distiller/internal/chrome/cdp"
 	"context"
+	"log/slog"
 	"sync"
 
 	"github.com/go-rod/rod"
@@ -17,6 +18,7 @@ const (
 
 type listener struct {
 	// external parameters, immutable
+	logger *slog.Logger
 	ctx    context.Context
 	events chan<- Event
 	page   *rod.Page
@@ -29,11 +31,12 @@ type listener struct {
 	treeState *listenerPageState
 }
 
-func newListener(ctx context.Context, out chan<- Event, page *rod.Page) listener {
+func newListener(ctx context.Context, logger *slog.Logger, out chan<- Event, page *rod.Page) listener {
 	l := listener{
-		events: out,
-		page:   page,
 		ctx:    ctx,
+		logger: logger.WithGroup("listener"),
+		page:   page,
+		events: out,
 		cdpResPool: &sync.Pool{
 			New: func() any {
 				return &cdp.AXNodesResult{

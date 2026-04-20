@@ -3,6 +3,7 @@ package axstream
 import (
 	"ax-distiller/internal/chrome/cdp"
 	"context"
+	"log/slog"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
@@ -22,7 +23,8 @@ type Event struct {
 	Updated []*cdp.AXNodeWithRelatives
 }
 
-func Listen(ctx context.Context, page *rod.Page) (out <-chan Event, err error) {
+func Listen(ctx context.Context, logger *slog.Logger, page *rod.Page) (out <-chan Event, err error) {
+	logger = logger.WithGroup("axstream")
 	page = page.Context(ctx)
 
 	err = cdp.CommandUnary(ctx, page, proto.AccessibilityEnable{})
@@ -32,7 +34,7 @@ func Listen(ctx context.Context, page *rod.Page) (out <-chan Event, err error) {
 
 	events := make(chan Event, out_channel_buffer_size)
 	out = events
-	newListener(ctx, events, page)
+	newListener(ctx, logger, events, page)
 
 	return
 }
