@@ -52,18 +52,17 @@ type structureEntry struct {
 }
 
 type Persistent struct {
-	Root *Structure
-	// we use the proto.DOMBackendNodeID because it is faster to hash an int
-	state      map[proto.DOMBackendNodeID]*Structure
-	recomputed map[proto.DOMBackendNodeID]*Structure
+	Root       *Structure
+	state      map[proto.AccessibilityAXNodeID]*Structure
+	recomputed map[proto.AccessibilityAXNodeID]*Structure
 	logger     *slog.Logger
 }
 
 func NewPersistent(logger *slog.Logger) *Persistent {
 	return &Persistent{
 		Root:       nil,
-		state:      make(map[proto.DOMBackendNodeID]*Structure),
-		recomputed: make(map[proto.DOMBackendNodeID]*Structure),
+		state:      make(map[proto.AccessibilityAXNodeID]*Structure),
+		recomputed: make(map[proto.AccessibilityAXNodeID]*Structure),
 		logger:     logger.WithGroup("persistent"),
 	}
 }
@@ -72,6 +71,7 @@ func (p *Persistent) shallowIterNonIgnoredDescendentsInner(node *cdp.AXNodeWithR
 	if node == nil {
 		return
 	}
+	defer p.shallowIterNonIgnoredDescendentsInner(node.NextSibling, yield)
 	if !node.Underlying.Ignored {
 		// we always immediately return when finding non-ignored node,
 		// therefore there is no case where a node with a non-ignored ancestor
@@ -80,7 +80,6 @@ func (p *Persistent) shallowIterNonIgnoredDescendentsInner(node *cdp.AXNodeWithR
 		return
 	}
 	p.shallowIterNonIgnoredDescendentsInner(node.FirstChild, yield)
-	p.shallowIterNonIgnoredDescendentsInner(node.NextSibling, yield)
 }
 
 func (p *Persistent) shallowIterNonIgnoredDescendents(node *cdp.AXNodeWithRelatives) iter.Seq[*cdp.AXNodeWithRelatives] {
@@ -90,8 +89,8 @@ func (p *Persistent) shallowIterNonIgnoredDescendents(node *cdp.AXNodeWithRelati
 	}
 }
 
-func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state map[proto.DOMBackendNodeID]*Structure) (out *Structure) {
-	existing, ok := state[node.Underlying.BackendDOMNodeID]
+func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state map[proto.AccessibilityAXNodeID]*Structure) (out *Structure) {
+	existing, ok := state[node.Underlying.NodeID]
 	if ok {
 		out = existing
 		return
@@ -106,6 +105,7 @@ func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state
 	for child := range p.shallowIterNonIgnoredDescendents(node) {
 		// single child may return multiple children in linked list (via NextSibling)
 		childStructs := p.recomputeNodeStructure(child, state)
+
 		if prev == nil {
 			// set first child to the first childStruct
 			out.FirstChild = childStructs
@@ -141,7 +141,7 @@ func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state
 		}
 	}
 
-	state[node.Underlying.BackendDOMNodeID] = out
+	state[node.Underlying.NodeID] = out
 	return
 }
 
@@ -160,7 +160,7 @@ func (p *Persistent) reconcileRecomputed() {
 					}
 				}
 				p.logger.Debug("delete dropped", "node", prevChild.Underlying.BackendDOMNodeID)
-				delete(p.state, prevChild.Underlying.BackendDOMNodeID)
+				delete(p.state, prevChild.Underlying.NodeID)
 			}
 		}
 

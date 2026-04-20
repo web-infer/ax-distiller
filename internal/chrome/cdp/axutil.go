@@ -1,6 +1,9 @@
 package cdp
 
-import "ax-distiller/internal/tree"
+import (
+	"ax-distiller/internal/tree"
+	"fmt"
+)
 
 // AXNodeWithRelatives is an AXNode with a FirstChild and NextSibling pointer
 // that enable much faster traversal than a hashmap lookup (if we were to just
@@ -17,9 +20,8 @@ type AXNodeWithRelatives struct {
 
 func (r AXNodeWithRelatives) Debug() tree.DebugInfo {
 	return tree.DebugInfo{
-		Name:     r.Underlying.Name.Value,
+		Name:     fmt.Sprintf("%v [%v]", r.Underlying.Name.Value, r.Underlying.Ignored),
 		Metadata: r.Underlying.NodeID,
-		Ignored:  r.Underlying.Ignored,
 	}
 }
 
@@ -32,4 +34,8 @@ func (r AXNodeWithRelatives) Relatives() tree.Relatives {
 		rel.NextSibling = r.NextSibling
 	}
 	return rel
+}
+
+func (r AXNodeWithRelatives) String() string {
+	return tree.Print(r)
 }

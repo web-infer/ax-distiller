@@ -7,6 +7,7 @@ import (
 	"ax-distiller/internal/slogx"
 	"ax-distiller/internal/structure"
 	"context"
+	"fmt"
 	"iter"
 	"log/slog"
 	"os"
@@ -68,7 +69,7 @@ func main() {
 		http.ListenAndServe("localhost:6060", nil)
 	}()
 
-	logger := slogx.DemoLogger(slog.LevelDebug, func(group string, attrs iter.Seq[slog.Attr]) bool {
+	logger := slogx.DemoLogger(slog.LevelInfo, func(group string, attrs iter.Seq[slog.Attr]) bool {
 		switch group {
 		case "main", "persistent":
 			return true
@@ -102,6 +103,7 @@ func main() {
 				switch e.Type {
 				case axstream.EVENT_RESET:
 					logger.Info("page reset", "root", persistent.Root.Hash)
+					fmt.Println(persistent.Root)
 				case axstream.EVENT_PATCH:
 					logger.Info("page updated")
 				}
