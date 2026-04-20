@@ -9,15 +9,14 @@ type Value[T any] struct {
 // AXNode exists because *proto.AccessibilityAXNode contains a bunch of
 // unnecessary fields that slow down parsing
 type AXNode struct {
-	NodeID           proto.AccessibilityAXNodeID   `json:"nodeId"`
-	BackendDOMNodeID proto.DOMBackendNodeID        `json:"backendDOMNodeId"`
-	ChildIDs         []proto.AccessibilityAXNodeID `json:"childIds,omitempty"`
-
-	Ignored bool          `json:"ignored"`
-	Role    Value[string] `json:"role"`
-	Name    Value[string] `json:"name"`
+	NodeID           proto.AccessibilityAXNodeID `json:"nodeId"`
+	BackendDOMNodeID proto.DOMBackendNodeID      `json:"backendDOMNodeId"`
+	Ignored          bool                        `json:"ignored"`
+	Role             Value[string]               `json:"role"`
+	Name             Value[string]               `json:"name"`
 	// Description Value[string] `json:"description"`
 	// Value       Value[any]    `json:"value"`
+	ChildIDs []proto.AccessibilityAXNodeID `json:"childIds,omitempty"`
 }
 
 type AXNodesResult struct {

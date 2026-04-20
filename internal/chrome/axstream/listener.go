@@ -1,0 +1,72 @@
+package axstream
+
+import (
+	"ax-distiller/internal/chrome/cdp"
+	"context"
+	"sync"
+
+	"github.com/go-rod/rod"
+)
+
+// performance tuning
+const (
+	sub_worker_count        = 8
+	sub_channel_buffer_size = 8
+	out_channel_buffer_size = 8
+)
+
+type listener struct {
+	// external parameters, immutable
+	ctx    context.Context
+	events chan<- Event
+	page   *rod.Page
+
+	// allocated on init, immutable
+	cdpResPool *sync.Pool
+	subs       chan subReq
+
+	// mutable treeState, reset on page reset
+	treeState *listenerPageState
+}
+
+func newListener(ctx context.Context, out chan<- Event, page *rod.Page) listener {
+	l := listener{
+		events: out,
+		page:   page,
+		ctx:    ctx,
+		cdpResPool: &sync.Pool{
+			New: func() any {
+				return &cdp.AXNodesResult{
+					Nodes: make([]cdp.AXNode, 0),
+				}
+			},
+		},
+		subs: make(chan subReq, sub_channel_buffer_size),
+	}
+	l.treeState = newListenerPageState(l)
+	for range sub_worker_count {
+		// this is a worker that is in charge of subscribing to newly found
+		// discovered nodes from events
+		go l.subscriberWorker()
+	}
+	// we do not spawn multiple event workers because events must be handled in
+	// order (ex. some node is deleted and re-inserted with a different tree,
+	// if this ordering is corrupted catastrophic results will follow)
+	//
+	// we avoid blockage by async/IO operations by sending them all into the
+	// subscription worker goroutines and buffering the channel to avoid being
+	// blocked by channel write, this also naturally functions as a
+	// backpressure mechanism (to stop event loop from sending more work to the
+	// subscription workers if they cannot keep up & prevent potential memory
+	// usage skyrocketing)
+	go l.eventSourceWorker()
+	return l
+}
+
+// TODO: unnecessary code for now
+//
+//	func isInvalidNodeCDPErr(err error) bool {
+//		return strings.Contains(err.Error(), "Could not find") ||
+//			strings.Contains(err.Error(), "Invalid ID") ||
+//			strings.Contains(err.Error(), "No node found")
+//	}

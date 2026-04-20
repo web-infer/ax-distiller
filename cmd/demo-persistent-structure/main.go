@@ -4,6 +4,7 @@ import (
 	"ax-distiller/internal/chrome"
 	"ax-distiller/internal/chrome/axstream"
 	"ax-distiller/internal/chrome/fastclient"
+	"ax-distiller/internal/structure"
 	"context"
 	"log/slog"
 	"os"
@@ -59,40 +60,44 @@ func NewTestBrowser(chromeBin string) (browser *rod.Browser, err error) {
 }
 
 func main() {
-	logger := slog.New(tint.NewHandler(os.Stderr, &tint.Options{
-		Level: slog.LevelInfo,
-	}))
-	slog.SetDefault(logger)
-
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
+
+	logger := slog.New(tint.NewHandler(os.Stderr, &tint.Options{
+		Level: slog.LevelDebug,
+	}))
+	slog.SetDefault(logger)
 
 	browser, err := NewTestBrowser("chromium")
 	if err != nil {
 		panic(err)
 	}
+	persistent := structure.NewPersistent()
+
+	events := make(chan axstream.Event)
+	go func() {
+		for e := range events {
+			switch e.Type {
+			case axstream.EVENT_RESET:
+				if persistent.Root != nil {
+					slog.Info("event reset root", "hash", persistent.Root.Hash)
+				} else {
+					slog.Info("event reset root")
+				}
+			case axstream.EVENT_PATCH:
+			}
+
+			persistent.HandleEvent(e)
+		}
+	}()
+
 	p := browser.MustPage("about:blank")
 	chrome.DisableUnusedCDP(p)
-
-	events, err := axstream.Listen(ctx, p)
+	// chrome.BlockGraphics(p)
+	err = axstream.Listen(ctx, events, p)
 	if err != nil {
 		panic(err)
 	}
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case e := <-events:
-				switch e.Type {
-				case axstream.EVENT_RESET:
-					slog.Info("reset")
-				case axstream.EVENT_PATCH:
-					slog.Info("patch", "added", len(e.Added), "updated", len(e.Updated))
-				}
-			}
-		}
-	}()
 
 	p.MustNavigate("https://amazon.com")
 
