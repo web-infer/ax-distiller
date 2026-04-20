@@ -16,7 +16,7 @@ func parseLayer(str string) (ret *cdp.AXNodeWithRelatives) {
 	for _, c := range str {
 		if prev == nil {
 			prev = &cdp.AXNodeWithRelatives{
-				AXNode: &cdp.AXNode{
+				Underlying: cdp.AXNode{
 					Role: cdp.Value[string]{Value: string(c)},
 				},
 			}
@@ -24,7 +24,7 @@ func parseLayer(str string) (ret *cdp.AXNodeWithRelatives) {
 			continue
 		}
 		node := &cdp.AXNodeWithRelatives{
-			AXNode: &cdp.AXNode{
+			Underlying: cdp.AXNode{
 				Role: cdp.Value[string]{Value: string(c)},
 			},
 		}

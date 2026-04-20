@@ -26,40 +26,6 @@ type Structure struct {
 	NextSibling *Structure
 }
 
-func convertToStructure(start *cdp.AXNodeWithRelatives) (ret *Structure) {
-	if start == nil {
-		return nil
-	}
-
-	var prev *Structure
-	for cur := start; cur != nil; cur = cur.NextSibling {
-		fc := Construct(cur.FirstChild)
-		newNode := &Structure{
-			Underlying: cur.AXNode,
-			FirstChild: fc,
-		}
-
-		hashBuf := []byte(cur.Role.Value)
-		for child := fc; child != nil; child = child.NextSibling {
-			hashBuf = binary.LittleEndian.AppendUint64(hashBuf, child.Hash)
-		}
-		newNode.Hash = xxh3.Hash(hashBuf)
-
-		if ret == nil {
-			ret = newNode
-		}
-		if prev != nil {
-			prev.NextSibling = newNode
-		}
-		prev = newNode
-		for prev.NextSibling != nil {
-			prev = prev.NextSibling
-		}
-	}
-
-	return
-}
-
 var synthetic_list_role = unique.Make("SYNTHETIC_LIST")
 
 // this removes adjacent letters and replaces it with a reference:
@@ -285,6 +251,51 @@ curStart:
 		// the case where the first node is the start of a pattern instance
 		if ret == nil {
 			ret = newNode
+		}
+	}
+
+	return
+}
+
+func convertToStructure(start *cdp.AXNodeWithRelatives) (ret *Structure) {
+	if start == nil {
+		return nil
+	}
+
+	/*
+		cur iterates from start to end
+
+		prev is structure
+
+		newNode is created for each cur
+
+		this is because Construct may return multiple nodes, they must be
+		conjoined properly
+	*/
+
+	var prev *Structure
+	for cur := start; cur != nil; cur = cur.NextSibling {
+		fc := Construct(cur.FirstChild)
+		newNode := &Structure{
+			Underlying: &cur.Underlying,
+			FirstChild: fc,
+		}
+
+		hashBuf := []byte(cur.Underlying.Role.Value)
+		for child := fc; child != nil; child = child.NextSibling {
+			hashBuf = binary.LittleEndian.AppendUint64(hashBuf, child.Hash)
+		}
+		newNode.Hash = xxh3.Hash(hashBuf)
+
+		if ret == nil {
+			ret = newNode
+		}
+		if prev != nil {
+			prev.NextSibling = newNode
+		}
+		prev = newNode
+		for prev.NextSibling != nil {
+			prev = prev.NextSibling
 		}
 	}
 
