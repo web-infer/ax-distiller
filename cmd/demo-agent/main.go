@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/go-rod/rod"
@@ -79,10 +80,10 @@ func newBrowser(chromeBin string, headless bool) (*rod.Browser, error) {
 
 func main() {
 	var (
-		headless = flag.Bool("headless", false, "run Chrome headless (no window)")
-		maxPages = flag.Int("max-pages", agent.MaxPages, "max pages to visit (1-10)")
+		headless  = flag.Bool("headless", false, "run Chrome headless (no window)")
+		maxPages  = flag.Int("max-pages", agent.MaxPages, "max pages to visit (1-10)")
 		chromeBin = flag.String("chrome", "", "path to Chrome/Chromium binary (auto-detected if empty)")
-		verbose  = flag.Bool("verbose", false, "enable debug logging")
+		verbose   = flag.Bool("verbose", false, "enable debug logging")
 	)
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: demo-agent [flags] <task>")
@@ -155,6 +156,21 @@ func main() {
 
 	client := anthropic.NewClient()
 	spawner := agent.NewSpawner(&client, eng, logger)
+
+	// periodic token usage reporter
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				in, out, total := spawner.Usage().Total()
+				fmt.Printf("[tokens] input=%d output=%d total=%d\n", in, out, total)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	fmt.Printf("Task: %s\n\n", task)
 	result := spawner.Run(ctx, task)

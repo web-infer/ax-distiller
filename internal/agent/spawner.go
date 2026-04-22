@@ -28,6 +28,7 @@ type Spawner struct {
 	engine  *Engine
 	logger  *slog.Logger
 	workers [maxWorkers]*Worker
+	usage   TokenUsage
 }
 
 func NewSpawner(client *anthropic.Client, engine *Engine, logger *slog.Logger) *Spawner {
@@ -37,10 +38,13 @@ func NewSpawner(client *anthropic.Client, engine *Engine, logger *slog.Logger) *
 		logger: logger,
 	}
 	for i := range maxWorkers {
-		s.workers[i] = NewWorker(client, engine, logger)
+		s.workers[i] = NewWorker(client, engine, logger, &s.usage)
 	}
 	return s
 }
+
+// Usage returns the shared token counter for this spawner and its workers.
+func (s *Spawner) Usage() *TokenUsage { return &s.usage }
 
 func (s *Spawner) Run(ctx context.Context, task string) string {
 	// 1 LLM call: parse intent
@@ -109,9 +113,6 @@ func (s *Spawner) Run(ctx context.Context, task string) string {
 						findings = append(findings, result.Findings)
 						findingsMu.Unlock()
 					}
-					for _, u := range result.NewURLs {
-						enqueue(WorkItem{Goal: msg.item.Goal, URL: u})
-					}
 					complete()
 				case <-ctx.Done():
 					return
@@ -122,7 +123,12 @@ func (s *Spawner) Run(ctx context.Context, task string) string {
 
 	wg.Wait()
 
-	return s.synthesize(ctx, intent.Goal, findings)
+	result := s.synthesize(ctx, intent.Goal, findings)
+
+	in, out, total := s.usage.Total()
+	s.logger.Info("token usage", "input", in, "output", out, "total", total)
+
+	return result
 }
 
 func (s *Spawner) parseIntent(ctx context.Context, task string) (intentResult, error) {
@@ -142,6 +148,8 @@ func (s *Spawner) parseIntent(ctx context.Context, task string) (intentResult, e
 	if len(msg.Content) == 0 {
 		return intentResult{}, fmt.Errorf("empty response")
 	}
+	s.usage.Add(msg.Usage)
+
 	var r intentResult
 	raw := stripJSON(msg.Content[0].Text)
 	if err := json.Unmarshal([]byte(raw), &r); err != nil {
@@ -167,5 +175,6 @@ func (s *Spawner) synthesize(ctx context.Context, goal string, findings []string
 	if len(msg.Content) == 0 {
 		return "(no answer)"
 	}
+	s.usage.Add(msg.Usage)
 	return msg.Content[0].Text
 }

@@ -22,63 +22,80 @@ func Serialize(root *structure.Structure, opts SerializeOptions) string {
 	}
 	var sb strings.Builder
 	count := 0
-	serializeNode(&sb, root, 0, &count, opts)
+	serializeNode(&sb, root, &count, opts)
 	return sb.String()
 }
 
-// skipRoles are noisy structural roles with no LLM value — skip unless they have a name.
 var skipRoles = map[string]bool{
 	"StaticText":    true,
 	"InlineTextBox": true,
 }
 
-// transparentRoles pass through to children without emitting a line when they have no name.
 var transparentRoles = map[string]bool{
-	"generic":  true,
-	"none":     true,
-	"ignored":  true,
+	"generic": true,
+	"none":    true,
+	"ignored": true,
 }
 
-func serializeNode(sb *strings.Builder, node *structure.Structure, depth int, count *int, opts SerializeOptions) {
-	if node == nil || *count >= opts.MaxLines || depth > opts.MaxDepth {
-		return
-	}
+type stackEntry struct {
+	node  *structure.Structure
+	depth int
+}
 
-	role := node.Underlying.Role.Value
-	name := node.Underlying.Name.Value
-	if len(name) > opts.NameMaxLen {
-		name = name[:opts.NameMaxLen] + "..."
-	}
+// serializeNode iterates the left-child/right-sibling tree without recursion.
+// Transparent nodes (generic with no name) are collapsed — children promoted to same depth.
+func serializeNode(sb *strings.Builder, root *structure.Structure, count *int, opts SerializeOptions) {
+	stack := []stackEntry{{root, 0}}
 
-	isSynthetic := role == "SYNTHETIC_LIST" || role == "SYNTHETIC_OBJECT"
+	for len(stack) > 0 && *count < opts.MaxLines {
+		e := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
 
-	// skip pure noise roles
-	if skipRoles[role] {
-		serializeNode(sb, node.NextSibling, depth, count, opts)
-		return
-	}
+		node, depth := e.node, e.depth
+		if node == nil || depth > opts.MaxDepth {
+			continue
+		}
 
-	// transparent roles with no name: don't emit a line, but still recurse children
-	if transparentRoles[role] && name == "" && !isSynthetic {
-		serializeNode(sb, node.FirstChild, depth, count, opts)
-		serializeNode(sb, node.NextSibling, depth, count, opts)
-		return
-	}
+		role := node.Underlying.Role.Value
+		name := node.Underlying.Name.Value
+		if len(name) > opts.NameMaxLen {
+			name = name[:opts.NameMaxLen] + "..."
+		}
 
-	indent := strings.Repeat("  ", depth)
-	if isSynthetic {
-		fmt.Fprintf(sb, "%s%s:\n", indent, role)
-	} else {
-		id := node.Underlying.BackendDOMNodeID
-		fmt.Fprintf(sb, "%s[%d] %s: %q\n", indent, id, role, name)
+		isSynthetic := role == "SYNTHETIC_LIST" || role == "SYNTHETIC_OBJECT"
+
+		// push sibling before processing children (stack is LIFO — sibling processed after subtree)
+		if node.NextSibling != nil {
+			stack = append(stack, stackEntry{node.NextSibling, depth})
+		}
+
+		if skipRoles[role] {
+			continue
+		}
+
+		if transparentRoles[role] && name == "" && !isSynthetic {
+			// collapse: promote children to same depth (not depth+1)
+			if node.FirstChild != nil {
+				stack = append(stack, stackEntry{node.FirstChild, depth})
+			}
+			continue
+		}
+
+		indent := strings.Repeat("  ", depth)
+		if isSynthetic {
+			fmt.Fprintf(sb, "%s%s:\n", indent, role)
+		} else {
+			id := node.Underlying.BackendDOMNodeID
+			fmt.Fprintf(sb, "%s[%d] %s: %q\n", indent, id, role, name)
+		}
+		*count++
+
+		if node.FirstChild != nil {
+			stack = append(stack, stackEntry{node.FirstChild, depth + 1})
+		}
 	}
-	*count++
 
 	if *count >= opts.MaxLines {
-		fmt.Fprintf(sb, "%s... (truncated at %d lines)\n", indent, opts.MaxLines)
-		return
+		fmt.Fprintf(sb, "... (truncated at %d lines)\n", opts.MaxLines)
 	}
-
-	serializeNode(sb, node.FirstChild, depth+1, count, opts)
-	serializeNode(sb, node.NextSibling, depth, count, opts)
 }

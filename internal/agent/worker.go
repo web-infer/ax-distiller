@@ -3,26 +3,25 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/anthropics/anthropic-sdk-go"
 )
 
-const maxWorkerTurns = 5
+const maxWorkerTurns = 20
 
 type workerDecision struct {
-	Action      string   `json:"action"`
-	Findings    string   `json:"findings"`
-	URLs        []string `json:"urls"`
-	ClickNodeID int64    `json:"click_node_id"`
-	TypeNodeID  int64    `json:"type_node_id"`
-	TypeText    string   `json:"type_text"`
+	Action      string `json:"action"`
+	Findings    string `json:"findings"`
+	ClickNodeID int64  `json:"click_node_id"`
+	TypeNodeID  int64  `json:"type_node_id"`
+	TypeText    string `json:"type_text"`
 }
 
 type WorkerResult struct {
 	Findings string
-	NewURLs  []string
 }
 
 type Worker struct {
@@ -30,14 +29,16 @@ type Worker struct {
 	engine   *Engine
 	executor *Executor
 	logger   *slog.Logger
+	usage    *TokenUsage
 }
 
-func NewWorker(client *anthropic.Client, engine *Engine, logger *slog.Logger) *Worker {
+func NewWorker(client *anthropic.Client, engine *Engine, logger *slog.Logger, usage *TokenUsage) *Worker {
 	return &Worker{
 		client:   client,
 		engine:   engine,
 		executor: NewExecutor(engine, logger),
 		logger:   logger,
+		usage:    usage,
 	}
 }
 
@@ -61,46 +62,31 @@ func (w *Worker) Run(ctx context.Context, goal, url string) WorkerResult {
 			return WorkerResult{}
 		}
 
-		w.logger.Info("worker decision", "action", decision.Action, "url", currentURL)
+		w.logger.Info("worker decision", "action", decision.Action, "url", currentURL, "page", pageNum)
 
 		switch decision.Action {
 		case "extract":
 			return WorkerResult{Findings: decision.Findings}
 
-		case "follow_urls":
-			return WorkerResult{NewURLs: decision.URLs}
-
 		case "done":
 			return WorkerResult{}
 
 		case "interact":
-			interactErr := ""
-			if decision.ClickNodeID != 0 {
-				if err := w.engine.inter.Click(ctx, decision.ClickNodeID); err != nil {
-					w.logger.Warn("click failed", "node_id", decision.ClickNodeID, "err", err)
-					interactErr = fmt.Sprintf("click node %d failed: %v", decision.ClickNodeID, err)
-				} else {
-					w.engine.inter.WaitSettle()
-				}
-			} else if decision.TypeNodeID != 0 {
-				if err := w.engine.inter.Type(ctx, decision.TypeNodeID, decision.TypeText); err != nil {
-					w.logger.Warn("type failed", "node_id", decision.TypeNodeID, "err", err)
-					interactErr = fmt.Sprintf("type node %d failed: %v", decision.TypeNodeID, err)
-				} else {
-					w.engine.inter.WaitSettle()
-				}
-			}
-			// re-read regardless (interaction may have partially worked)
-			res, err = w.engine.reread(ctx)
+			res, err = w.executor.ExecDecision(ctx, decision)
 			if err != nil {
-				w.logger.Warn("reread failed", "err", err)
-				return WorkerResult{}
+				if errors.Is(err, ErrPageLimitReached) {
+					w.logger.Warn("page limit reached during navigation")
+					return WorkerResult{}
+				}
+				w.logger.Warn("interact failed", "err", err)
+				currentStructure = "INTERACTION ERROR: " + err.Error() + "\n\n" + currentStructure
+				// re-read current page state even after error
+				if res, err = w.engine.reread(ctx); err != nil {
+					return WorkerResult{}
+				}
 			}
+			currentURL = res.URL
 			currentStructure = res.Structure
-			if interactErr != "" {
-				// prepend error so next decide call knows what failed
-				currentStructure = "INTERACTION ERROR: " + interactErr + "\n\n" + currentStructure
-			}
 			pageNum = res.PageNum
 
 		default:
@@ -133,12 +119,13 @@ func (w *Worker) decide(ctx context.Context, goal, url string, pageNum int, stru
 		return workerDecision{}, fmt.Errorf("empty response")
 	}
 
+	w.usage.Add(msg.Usage)
+
 	raw := stripJSON(msg.Content[0].Text)
-	w.logger.Info("worker raw decision", "raw", raw)
+	w.logger.Info("worker raw decision", "raw", raw, "in", msg.Usage.InputTokens, "out", msg.Usage.OutputTokens)
 	var d workerDecision
 	if err := json.Unmarshal([]byte(raw), &d); err != nil {
 		return workerDecision{}, fmt.Errorf("json parse failed: %w (raw: %s)", err, raw)
 	}
-	w.logger.Info("worker decision parsed", "action", d.Action, "findings", d.Findings, "urls", d.URLs)
 	return d, nil
 }

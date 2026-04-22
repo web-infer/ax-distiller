@@ -110,25 +110,63 @@ patchDrain:
 	}, nil
 }
 
-// reread re-serializes the current page state without navigating.
-// Used by Executor after an interaction changes DOM without a full page load.
+// reread re-serializes after an in-page interaction.
+// If a link click caused navigation (EVENT_RESET arrives), treats it as a new page load
+// and enforces the page budget.
 func (e *Engine) reread(ctx context.Context) (EngineResult, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	// drain any pending patch events
-	drain:
+	// drain events; give up to 3s for any navigation to arrive
+	timeout := time.After(3 * time.Second)
+	var navigated bool
+drain:
 	for {
 		select {
 		case ev := <-e.events:
 			e.persistent.HandleEvent(ev)
-		default:
+			if ev.Type == axstream.EVENT_RESET {
+				navigated = true
+				// keep draining patches after reset
+				patchTimeout := time.After(2 * time.Second)
+			patchDrain:
+				for {
+					select {
+					case pev := <-e.events:
+						e.persistent.HandleEvent(pev)
+					case <-patchTimeout:
+						break patchDrain
+					case <-ctx.Done():
+						break patchDrain
+					}
+				}
+				break drain
+			}
+		case <-timeout:
 			break drain
+		case <-ctx.Done():
+			return EngineResult{}, ctx.Err()
 		}
+	}
+
+	if navigated {
+		if e.pageCount >= e.maxPages {
+			return EngineResult{}, ErrPageLimitReached
+		}
+		e.pageCount++
+		url := e.inter.CurrentURL()
+		e.visited[url] = true
+		e.logger.Info("engine: navigation detected", "url", url, "page", e.pageCount)
+		// WaitSettle lets the new execution context register before any node resolution
+		e.inter.WaitSettle()
+		text := Serialize(e.persistent.Root, DefaultSerializeOptions())
+		e.dumpDebug(url, text, e.pageCount)
+		return EngineResult{URL: url, Structure: text, PageNum: e.pageCount}, nil
 	}
 
 	text := Serialize(e.persistent.Root, DefaultSerializeOptions())
 	return EngineResult{
+		URL:       e.inter.CurrentURL(),
 		Structure: text,
 		PageNum:   e.pageCount,
 	}, nil
