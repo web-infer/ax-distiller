@@ -4,8 +4,10 @@ import (
 	"ax-distiller/internal/chrome/axstream"
 	"ax-distiller/internal/chrome/cdp"
 	"encoding/binary"
+	"fmt"
 	"iter"
 	"log/slog"
+	"slices"
 
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/zeebo/xxh3"
@@ -53,18 +55,26 @@ type structureEntry struct {
 
 type Persistent struct {
 	Root       *Structure
+	logger     *slog.Logger
+	index      map[uint64][]*cdp.AXNode
 	state      map[proto.AccessibilityAXNodeID]*Structure
 	recomputed map[proto.AccessibilityAXNodeID]*Structure
-	logger     *slog.Logger
 }
 
 func NewPersistent(logger *slog.Logger) *Persistent {
 	return &Persistent{
 		Root:       nil,
+		index:      make(map[uint64][]*cdp.AXNode),
 		state:      make(map[proto.AccessibilityAXNodeID]*Structure),
 		recomputed: make(map[proto.AccessibilityAXNodeID]*Structure),
 		logger:     logger.WithGroup("persistent"),
 	}
+}
+
+func (p *Persistent) isIgnored(node *cdp.AXNodeWithRelatives) bool {
+	return node.Underlying.Ignored ||
+		(node.FirstChild == nil && node.Underlying.Role.Value == "generic") ||
+		(node.FirstChild == nil && node.Underlying.Role.Value == "InlineTextBox")
 }
 
 func (p *Persistent) shallowIterNonIgnoredDescendentsInner(node *cdp.AXNodeWithRelatives, yield func(*cdp.AXNodeWithRelatives) bool) {
@@ -72,7 +82,7 @@ func (p *Persistent) shallowIterNonIgnoredDescendentsInner(node *cdp.AXNodeWithR
 		return
 	}
 	defer p.shallowIterNonIgnoredDescendentsInner(node.NextSibling, yield)
-	if !node.Underlying.Ignored {
+	if !p.isIgnored(node) {
 		// we always immediately return when finding non-ignored node,
 		// therefore there is no case where a node with a non-ignored ancestor
 		// is yielded
@@ -89,22 +99,29 @@ func (p *Persistent) shallowIterNonIgnoredDescendents(node *cdp.AXNodeWithRelati
 	}
 }
 
-func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state map[proto.AccessibilityAXNodeID]*Structure) (out *Structure) {
+func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state map[proto.AccessibilityAXNodeID]*Structure, nocache bool) (out *Structure) {
 	existing, ok := state[node.Underlying.NodeID]
-	if ok {
-		out = existing
-		return
+	if nocache {
+		if ok {
+			out = existing
+			return
+		}
+	} else {
+		if ok {
+			panic("should not hit cache while nocache is enabled!")
+		}
 	}
 
-	out = &Structure{
-		Underlying: &node.Underlying,
-	}
-	hashBuf := []byte(node.Underlying.Role.Value)
+	out = &Structure{Underlying: &node.Underlying}
+	hashBuff := []byte(node.Underlying.Role.Value)
 
 	var prev *Structure
 	for child := range p.shallowIterNonIgnoredDescendents(node) {
 		// single child may return multiple children in linked list (via NextSibling)
-		childStructs := p.recomputeNodeStructure(child, state)
+		childStructs := p.recomputeNodeStructure(child, state, nocache)
+
+		// may return NextSibling != nil, but only if hitting cache
+		// should never hit cache in root
 
 		if prev == nil {
 			// set first child to the first childStruct
@@ -116,13 +133,14 @@ func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state
 
 		for c := childStructs; c != nil; c = c.NextSibling {
 			// add all children hashes to structure
-			binary.LittleEndian.AppendUint64(hashBuf, c.Hash)
+			hashBuff = binary.LittleEndian.AppendUint64(hashBuff, c.Hash)
 			// prev points to the last node of the child list returned
 			prev = c
 		}
 	}
 
-	out.Hash = xxh3.Hash(hashBuf)
+	out.Hash = xxh3.Hash(hashBuff)
+	p.index[out.Hash] = append(p.index[out.Hash], &node.Underlying)
 
 	// we create synthetic structural wrappers for repeated nodes and patterns
 	// in the children linked list
@@ -141,7 +159,9 @@ func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state
 		}
 	}
 
-	state[node.Underlying.NodeID] = out
+	if out.NextSibling != nil {
+		panic("assert failed: out.NextSibling != nil")
+	}
 	return
 }
 
@@ -160,6 +180,12 @@ func (p *Persistent) reconcileRecomputed() {
 					}
 				}
 				p.logger.Debug("delete dropped", "node", prevChild.Underlying.BackendDOMNodeID)
+
+				instanceList := p.index[prevChild.Hash]
+				if instanceList != nil {
+					idx := slices.Index(instanceList, prevChild.Underlying)
+					p.index[prevChild.Hash] = slices.Delete(instanceList, idx, idx+1)
+				}
 				delete(p.state, prevChild.Underlying.NodeID)
 			}
 		}
@@ -175,15 +201,16 @@ func (p *Persistent) HandleEvent(e axstream.Event) {
 	case axstream.EVENT_RESET:
 		p.logger.Debug("start reset event")
 		clear(p.state)
-		p.Root = p.recomputeNodeStructure(e.Added[0], p.state)
+		p.Root = p.recomputeNodeStructure(e.Added[0], p.state, true)
+		fmt.Println(p.Root)
 		p.logger.Debug("finish reset event")
 	case axstream.EVENT_PATCH:
 		p.logger.Debug("start patch event")
 		for _, added := range e.Added {
-			p.recomputeNodeStructure(added, p.state)
+			p.recomputeNodeStructure(added, p.recomputed, false)
 		}
 		for _, updated := range e.Updated {
-			p.recomputeNodeStructure(updated, p.state)
+			p.recomputeNodeStructure(updated, p.recomputed, false)
 		}
 		p.reconcileRecomputed()
 		p.logger.Debug("finish patch event")

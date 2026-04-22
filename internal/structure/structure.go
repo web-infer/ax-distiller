@@ -95,7 +95,6 @@ func deleteAdjacent(start *Structure) (ret *Structure) {
 // this replaces the most frequent pattern with a reference
 // ABABC -> R_1 R_1 C (R_1 = AB)
 //
-// *extend to include patterns larger than 2
 // algorithm will choose most frequent pattern, favoring larger patterns
 // when the frequencies are the same
 func slideWindow(start *Structure) (ret *Structure, replaced bool) {
@@ -275,11 +274,11 @@ func convertToStructure(start *cdp.AXNodeWithRelatives) (ret *Structure) {
 			FirstChild: fc,
 		}
 
-		hashBuf := []byte(cur.Underlying.Role.Value)
+		hashBuff := []byte(cur.Underlying.Role.Value)
 		for child := fc; child != nil; child = child.NextSibling {
-			hashBuf = binary.LittleEndian.AppendUint64(hashBuf, child.Hash)
+			hashBuff = binary.LittleEndian.AppendUint64(hashBuff, child.Hash)
 		}
-		newNode.Hash = xxh3.Hash(hashBuf)
+		newNode.Hash = xxh3.Hash(hashBuff)
 
 		if ret == nil {
 			ret = newNode

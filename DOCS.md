@@ -95,3 +95,14 @@ Likewise, we can use a similar paradigm for website methods.
 > Starting at structure A, running 'click' on structure A.B
 > results in structure B"
 
+# Information Retrieval & Navigation
+
+Much like RAG, it is often not useful to rely on an LLM's internal
+memory. It would be much better to ensure the "website model" the
+LLM uses actually maps to reality than have it reverse engineer
+and reason on thin air and context.
+
+Like the LLM, we do not have a pre-built model which we are sure
+maps unto reality. We must be able to extract patterns from actual
+traces.
+

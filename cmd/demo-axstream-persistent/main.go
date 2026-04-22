@@ -7,7 +7,6 @@ import (
 	"ax-distiller/internal/slogx"
 	"ax-distiller/internal/structure"
 	"context"
-	"fmt"
 	"iter"
 	"log/slog"
 	"os"
@@ -103,7 +102,6 @@ func main() {
 				switch e.Type {
 				case axstream.EVENT_RESET:
 					logger.Info("page reset", "root", persistent.Root.Hash)
-					fmt.Println(persistent.Root)
 				case axstream.EVENT_PATCH:
 					logger.Info("page updated")
 				}
@@ -111,7 +109,7 @@ func main() {
 		}
 	}()
 
-	p.MustNavigate("https://amazon.com")
+	p.MustNavigate("https://ocw.mit.edu/search/?d=Mathematics")
 
 	<-ctx.Done()
 }
