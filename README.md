@@ -6,7 +6,7 @@
 
 ### `demo-agent` — LLM web traversal agent
 
-Multi-agent workflow that uses the AX heuristics engine to feed page structure to Claude.
+Single-worker agent that uses the AX heuristics engine to feed goal-filtered page structure to Claude. A goal-aware pruning agent strips irrelevant sections before each page is sent to the traversal worker.
 
 **Requirements:** `ANTHROPIC_API_KEY` env var set.
 

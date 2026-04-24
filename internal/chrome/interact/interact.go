@@ -40,7 +40,7 @@ func (i *Interact) Navigate(ctx context.Context, url string) error {
 
 func (i *Interact) Click(ctx context.Context, backendNodeID int64) error {
 	node := &proto.DOMNode{BackendNodeID: proto.DOMBackendNodeID(backendNodeID)}
-	el, err := i.Page.Context(ctx).ElementFromNode(node)
+	el, err := i.elementFromNode(ctx, node)
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func (i *Interact) Click(ctx context.Context, backendNodeID int64) error {
 
 func (i *Interact) Type(ctx context.Context, backendNodeID int64, text string) error {
 	node := &proto.DOMNode{BackendNodeID: proto.DOMBackendNodeID(backendNodeID)}
-	el, err := i.Page.Context(ctx).ElementFromNode(node)
+	el, err := i.elementFromNode(ctx, node)
 	if err != nil {
 		return err
 	}
@@ -60,6 +60,25 @@ func (i *Interact) Type(ctx context.Context, backendNodeID int64, text string) e
 		return err
 	}
 	return el.Input(text)
+}
+
+// elementFromNode resolves a BackendDOMNodeID to a rod Element, retrying up to
+// 3 times with 600ms backoff to handle stale execution contexts after navigation.
+func (i *Interact) elementFromNode(ctx context.Context, node *proto.DOMNode) (*rod.Element, error) {
+	var (
+		el  *rod.Element
+		err error
+	)
+	for attempt := range 3 {
+		el, err = i.Page.Context(ctx).ElementFromNode(node)
+		if err == nil {
+			return el, nil
+		}
+		if attempt < 2 {
+			time.Sleep(600 * time.Millisecond)
+		}
+	}
+	return nil, err
 }
 
 func (i *Interact) PressKey(ctx context.Context, key string) error {
@@ -79,10 +98,10 @@ func (i *Interact) CurrentURL() string {
 }
 
 func (i *Interact) WaitSettle() {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = i.Page.Context(ctx).WaitLoad()
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(800 * time.Millisecond)
 }
 
 // FindNode queries the live AX tree for a node matching role and/or name.

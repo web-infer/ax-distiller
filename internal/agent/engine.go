@@ -20,8 +20,10 @@ var ErrAlreadyVisited = errors.New("url already visited")
 
 type EngineResult struct {
 	URL       string
-	Structure string
+	Structure string // pre-serialized full tree (debug, non-navigated rerenders)
 	PageNum   int
+	Root      *structure.Structure // raw tree root for heuristic access
+	Navigated bool                 // true when a new page was loaded
 }
 
 type Engine struct {
@@ -101,12 +103,15 @@ patchDrain:
 	e.visited[url] = true
 	e.pageCount++
 
-	text := Serialize(e.persistent.Root, DefaultSerializeOptions())
+	root := e.persistent.Root
+	text := Serialize(root, DefaultSerializeOptions())
 	e.dumpDebug(url, text, e.pageCount)
 	return EngineResult{
 		URL:       url,
 		Structure: text,
 		PageNum:   e.pageCount,
+		Root:      root,
+		Navigated: true,
 	}, nil
 }
 
@@ -159,16 +164,20 @@ drain:
 		e.logger.Info("engine: navigation detected", "url", url, "page", e.pageCount)
 		// WaitSettle lets the new execution context register before any node resolution
 		e.inter.WaitSettle()
-		text := Serialize(e.persistent.Root, DefaultSerializeOptions())
+		root := e.persistent.Root
+		text := Serialize(root, DefaultSerializeOptions())
 		e.dumpDebug(url, text, e.pageCount)
-		return EngineResult{URL: url, Structure: text, PageNum: e.pageCount}, nil
+		return EngineResult{URL: url, Structure: text, PageNum: e.pageCount, Root: root, Navigated: true}, nil
 	}
 
-	text := Serialize(e.persistent.Root, DefaultSerializeOptions())
+	root := e.persistent.Root
+	text := Serialize(root, DefaultSerializeOptions())
 	return EngineResult{
 		URL:       e.inter.CurrentURL(),
 		Structure: text,
 		PageNum:   e.pageCount,
+		Root:      root,
+		Navigated: false,
 	}, nil
 }
 

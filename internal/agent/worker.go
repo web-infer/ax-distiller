@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"ax-distiller/internal/chrome/heuristic"
 	"context"
 	"encoding/json"
 	"errors"
@@ -52,7 +53,7 @@ func (w *Worker) Run(ctx context.Context, goal, url string) WorkerResult {
 	}
 
 	currentURL := res.URL
-	currentStructure := res.Structure
+	currentStructure := applyHeuristic(res)
 	pageNum := res.PageNum
 
 	for turn := range maxWorkerTurns {
@@ -68,7 +69,15 @@ func (w *Worker) Run(ctx context.Context, goal, url string) WorkerResult {
 		case "extract":
 			return WorkerResult{Findings: decision.Findings}
 
+		case "dead_end":
+			return WorkerResult{}
+
 		case "done":
+			// model used legacy/confused "done" — treat as extract if findings present
+			if decision.Findings != "" {
+				w.logger.Warn("worker used 'done' with findings, treating as extract")
+				return WorkerResult{Findings: decision.Findings}
+			}
 			return WorkerResult{}
 
 		case "interact":
@@ -79,15 +88,18 @@ func (w *Worker) Run(ctx context.Context, goal, url string) WorkerResult {
 					return WorkerResult{}
 				}
 				w.logger.Warn("interact failed", "err", err)
-				currentStructure = "INTERACTION ERROR: " + err.Error() + "\n\n" + currentStructure
-				// re-read current page state even after error
 				if res, err = w.engine.reread(ctx); err != nil {
 					return WorkerResult{}
 				}
+				currentURL = res.URL
+				pageNum = res.PageNum
+				// prepend error AFTER reread so LLM sees both the error and the fresh structure
+				currentStructure = "INTERACTION ERROR: " + err.Error() + "\n\n" + applyHeuristic(res)
+			} else {
+				currentURL = res.URL
+				currentStructure = applyHeuristic(res)
+				pageNum = res.PageNum
 			}
-			currentURL = res.URL
-			currentStructure = res.Structure
-			pageNum = res.PageNum
 
 		default:
 			w.logger.Warn("unknown action", "action", decision.Action)
@@ -96,6 +108,16 @@ func (w *Worker) Run(ctx context.Context, goal, url string) WorkerResult {
 	}
 
 	return WorkerResult{}
+}
+
+// applyHeuristic runs deterministic noise pruning on new page loads and
+// re-serializes the pruned tree. In-page interactions (Navigated=false)
+// return the pre-serialized structure unchanged.
+func applyHeuristic(res EngineResult) string {
+	if !res.Navigated || res.Root == nil {
+		return res.Structure
+	}
+	return Serialize(heuristic.Simplify(res.Root), DefaultSerializeOptions())
 }
 
 func (w *Worker) decide(ctx context.Context, goal, url string, pageNum int, structure string) (workerDecision, error) {

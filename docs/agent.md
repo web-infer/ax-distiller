@@ -4,13 +4,12 @@ LLM-driven web traversal built on top of the AX heuristics engine. Lives on `fea
 
 ## Overview
 
-The agent workflow lets Claude autonomously traverse websites by feeding it the compressed accessibility tree instead of raw HTML. Each page visit goes through the heuristics engine first — the LLM never sees DOM directly.
+The agent workflow lets Claude autonomously traverse websites by feeding it the compressed, goal-filtered accessibility tree instead of raw HTML. Each new page load goes through the pruning agent first — the worker LLM never sees noise sections irrelevant to the goal.
 
 **Constraints:**
 - Max 10 pages per run (hard cap, enforced in engine)
-- Max 3 concurrent worker agents
+- Single sequential worker (one page at a time, one browser)
 - All LLM inference via Anthropic API (remote, CPU-only)
-- URL pipeline is sequential + single-process (mutex-protected)
 - No duplicate URL visits (zero-cost dedup map)
 
 ---
@@ -25,28 +24,34 @@ User task
 │         Agent Spawner             │
 │  - 1 LLM call: parse intent      │
 │    → goal + starting URLs         │
-│  - work queue (URL + goal)        │
-│  - pool of ≤3 Worker goroutines   │
-│  - URL conflict guard (dedup map) │
+│  - sequential URL loop            │
+│  - single Worker                  │
 │  - collects findings              │
 │  - 1 final LLM call: synthesize  │
 └────────────┬─────────────────────┘
-             │ WorkItem{goal, url}
-    ┌────────┼────────┐
-    ▼        ▼        ▼
-┌────────┐ ┌────────┐ ┌────────┐
-│Worker 1│ │Worker 2│ │Worker 3│  ← identical, stateless
-└───┬────┘ └───┬────┘ └───┬────┘
-    │           │           │
-    └───────────┴───────────┘
-                │
-                ▼
+             │ goal + url (sequential)
+             ▼
+        ┌────────┐
+        │ Worker │  ← stateless, one URL at a time
+        └───┬────┘
+            │ new page detected
+            ▼
   ┌─────────────────────────────┐
-  │   Heuristics Engine          │  ← MUTEX-PROTECTED, SEQUENTIAL
+  │   Pruning Agent              │  ← goal-aware AX tree filter
+  │   Summarize(root) → 2-level  │
+  │   LLM call: prune_ids[]      │
+  │   PruneByIDs(root, ids)      │
+  │   → pruned *Structure        │
+  │   → Serialize → LLM text     │
+  └─────────────────────────────┘
+            │ (in-page interactions skip pruner)
+            ▼
+  ┌─────────────────────────────┐
+  │   Engine (browser)           │  ← MUTEX-PROTECTED, SEQUENTIAL
   │   navigate → EVENT_RESET    │
   │   + 2s EVENT_PATCH drain    │
   │   → Persistent.HandleEvent  │
-  │   → Serialize(Root)         │
+  │   → EngineResult{Root, ...} │
   └─────────────────────────────┘
 ```
 
@@ -56,30 +61,51 @@ User task
 
 ### Agent Spawner (`internal/agent/spawner.go`)
 
-Coordinates the full run with exactly 3 LLM interactions total (intent + N worker decisions + synthesize):
+Coordinates the full run:
 
 1. **Intent parse** (1 LLM call) — `ParseIntent(task) → {goal, start_urls[]}`
-2. **Worker pool** — spawns up to 3 goroutines pulling `WorkItem`s from a buffered channel
+2. **Sequential loop** — iterates `start_urls`, runs Worker on each in order
 3. **Synthesize** (1 LLM call) — `Synthesize(goal, findings[]) → string`
 
-Work queue uses an active-item counter to detect completion — workers can add new URLs while processing without deadlock.
+Single worker eliminates the browser race condition that existed with the prior worker pool (all workers shared one browser; concurrent clicks hit the wrong page).
 
 ### Worker Agent (`internal/agent/worker.go`)
 
-Stateless — no conversation history carried between URLs. Per-URL loop (max 5 turns):
+Stateless — no conversation history carried between URLs. Per-URL loop (max 20 turns):
 
-1. Call `engine.Load(url)` → serialized AX structure text
-2. Single LLM call: `Decide(goal, structure) → Decision`
-3. Dispatch on `Decision.Action`:
+1. Call `engine.Load(url)` → `EngineResult{Root, Navigated=true, ...}`
+2. On `Navigated=true`: call `Pruner.Prune(goal, root)` → pruned `*Structure` → serialize
+3. Single LLM call: `Decide(goal, structure) → Decision`
+4. Dispatch on `Decision.Action`:
 
 | Action | Behavior |
 |--------|----------|
 | `extract` | Return findings to spawner, done |
-| `follow_urls` | Enqueue new URLs in spawner, done |
 | `interact` | Execute click/type via Executor, loop back with fresh structure |
-| `done` | Signal no findings, done |
+| `dead_end` | Signal no findings, done |
+| `done` | Legacy fallback — rescued as extract if findings present |
 
 Uses `claude-haiku-4-5` — cheapest model, fast, sufficient for structured JSON decisions.
+
+### Pruning Agent (`internal/agent/pruner.go`)
+
+Goal-aware AX tree filter called once per new page load.
+
+1. `heuristic.Summarize(root)` — generates a shallow 2-level section overview (role + name, no full tree)
+2. Single Haiku LLM call (128 max tokens): receives goal + section summary, returns `{"prune_ids": [...]}`
+3. `heuristic.PruneByIDs(root, ids)` — builds pruned copy of tree (original untouched)
+4. Falls back to original root on any error — never drops content incorrectly
+
+**Conservative by design:** system prompt instructs to keep sections when uncertain. Only prunes sections with zero relevance to the goal (keyboard shortcut menus, footers, unrelated promotional regions, etc.).
+
+In-page interactions (`Navigated=false`) skip the pruner — structure returned as-is.
+
+### Heuristic Package (`internal/chrome/heuristic/heuristic.go`)
+
+Two pure functions operating on `*structure.Structure`:
+
+- `Summarize(root) string` — 2-level depth walk, skips SYNTHETIC wrappers, emits `[ID] role: "name"` per section
+- `PruneByIDs(root, ids map[int64]bool) *structure.Structure` — non-destructive copy with pruned subtrees omitted
 
 ### Executor (`internal/agent/executor.go`)
 
@@ -89,9 +115,9 @@ Separates "what to do" (Worker decision) from "how to do it" (browser operations
 func (e *Executor) ExecDecision(ctx context.Context, d workerDecision) (EngineResult, error)
 ```
 
-Handles `click_node_id` and `type_node_id` + `type_text` from worker decisions. After each interaction: `WaitSettle()` + `engine.reread()` to get updated structure.
+Handles `click_node_id` and `type_node_id` + `type_text` from worker decisions. After each interaction: `WaitSettle()` + `engine.reread()` to get updated structure. Sets `Navigated=true` on result only when a link click caused a page navigation (detected via `EVENT_RESET`).
 
-### Heuristics Engine (`internal/agent/engine.go`)
+### Engine (`internal/agent/engine.go`)
 
 The bridge between agents and the browser. **The only place that touches the browser.**
 
@@ -103,10 +129,19 @@ Sequential execution (mutex-locked):
 1. Check page budget (`pageCount >= maxPages`) → `ErrPageLimitReached`
 2. Check URL dedup (`visited[url]`) → `ErrAlreadyVisited`
 3. `interact.Navigate(url)`
-4. Drain events until `EVENT_RESET` (10s timeout)
+4. Drain events until `EVENT_RESET` (15s timeout)
 5. Drain `EVENT_PATCH` events for 2s — fills in the sparse post-reset tree
-6. `Serialize(persistent.Root)` → text
-7. Return `EngineResult{URL, Structure, PageNum}`
+6. Return `EngineResult{URL, Structure, PageNum, Root, Navigated: true}`
+
+`EngineResult` fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `URL` | `string` | Current page URL |
+| `Structure` | `string` | Pre-serialized full tree (debug dumps, non-navigated rerenders) |
+| `PageNum` | `int` | Page number within budget |
+| `Root` | `*structure.Structure` | Raw tree root for heuristic access |
+| `Navigated` | `bool` | True when a new page was loaded |
 
 ### Serializer (`internal/agent/serializer.go`)
 
@@ -117,32 +152,27 @@ Converts `*structure.Structure` → indented text the LLM can reason about.
 [1235] link: "See all results"
 SYNTHETIC_LIST:
   [1236] listitem: "Electronics"
-  [1236] listitem: "Books"
+  [1237] listitem: "Books"
 ```
 
-- `[ID]` = `BackendDOMNodeID` — stable, usable in click/type tool calls
+- `[ID]` = `BackendDOMNodeID` — stable, usable in click/type decisions
 - `SYNTHETIC_LIST` / `SYNTHETIC_OBJECT` = compressed wrappers, no ID, not clickable
-- Names truncated to 60 chars; max 300 lines; max depth 10
+- Names truncated to 80 chars; max 500 lines; max depth 12
 
 ---
 
-## URL Pipeline (Sequential)
+## Stop Conditions
 
-Every time any agent needs a new page:
+Worker exits early on:
+- `extract` action (found answer)
+- `dead_end` action (no path forward)
+- `ErrPageLimitReached` from engine
+- Turn limit (20 turns)
 
-```
-Agent calls engine.Load(url)
-  → mutex.Lock()  (blocks other workers)
-  → inter.Navigate(url)
-  → drain EVENT_RESET (10s timeout)
-  → drain EVENT_PATCHes (2s)
-  → persistent.HandleEvent(events...)
-  → Serialize(persistent.Root) → text
-  → mutex.Unlock()
-  → return text to agent
-```
-
-Workers never call `inter.Navigate` directly — all browser access goes through `Engine.Load` or `Engine.reread`.
+Model guidance in system prompt:
+- On last page (`page N/N`): must output `extract` or `dead_end` — no further navigation
+- `dead_end` = stuck with no relevant content AND no navigation path (not "task complete")
+- `extract` = only when the actual answer is present, not a navigation step
 
 ---
 
@@ -151,9 +181,10 @@ Workers never call `inter.Navigate` directly — all browser access goes through
 | Step | Calls | ~Tokens each | ~Total |
 |------|-------|-------------|--------|
 | Intent parse | 1 | 500 | 500 |
-| Worker Decide | ≤50 (10 pages × 5 turns) | 800 | 40k |
+| Pruner | ≤10 (one per page) | 300 | 3k |
+| Worker Decide | ≤20 (per URL, 20 turns) | 800 | 16k |
 | Synthesize | 1 | 2000 | 2000 |
-| **Total** | | | **~43k** |
+| **Total** | | | **~22k** |
 
 ---
 
@@ -162,13 +193,17 @@ Workers never call `inter.Navigate` directly — all browser access goes through
 ```
 cmd/demo-agent/main.go               entry point, CLI flags
 internal/agent/
-  spawner.go                         intent → worker pool → synthesize
+  spawner.go                         intent → sequential worker loop → synthesize
   worker.go                          stateless per-URL agent loop
+  pruner.go                          goal-aware LLM pruning agent
   executor.go                        executes browser actions (click/type)
   engine.go                          mutex-protected AX engine pipeline
   serializer.go                      *structure.Structure → LLM text
   prompt.go                          system prompts for spawner + worker
   json.go                            stripJSON (strips markdown fences)
+  usage.go                           shared atomic token counter
+internal/chrome/heuristic/
+  heuristic.go                       Summarize + PruneByIDs (pure, no LLM)
 internal/chrome/interact/
   interact.go                        Click, Type, Navigate, PressKey via rod
 ```

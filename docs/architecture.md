@@ -20,14 +20,21 @@ type Event struct {
 
 Hides listener lifecycle, reconnect logic, and CDP enable/disable calls behind `axstream.Listen(ctx, logger, page)`.
 
-### 3. structure (`internal/structure`)
+### 3. heuristic (`internal/chrome/heuristic`)
+
+Goal-aware AX tree simplification. Pure functions, no LLM:
+
+- `Summarize(root *structure.Structure) string` — 2-level section overview for the pruning agent prompt
+- `PruneByIDs(root *structure.Structure, ids map[int64]bool) *structure.Structure` — returns a pruned copy of the tree with specified subtrees removed; original untouched
+
+### 4. structure (`internal/structure`)
 
 Two responsibilities:
 
 - `Construct(*cdp.AXNodeWithRelatives) *Structure` — builds a compressed structural hash-tree from a raw AX subtree (stateless, pure).
 - `Persistent` — maintains a live, incrementally updated map of `NodeID → *Structure`, consuming `axstream.Event`s.
 
-### 4. cmd/ (entry points)
+### 5. cmd/ (entry points)
 
 Demo and test binaries. Wire the layers together with concrete loggers and browser connections.
 
