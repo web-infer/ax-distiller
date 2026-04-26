@@ -94,7 +94,8 @@ func (s *BundledRequests[ID]) AddChild(child *BundledRequests[ID]) {
 		panic("attempted to add child after all targets have resolved")
 	}
 	if s.fired.Load() {
-		panic("cannot resolve after fired")
+		s.logger.Warn("add child after fire, no-op")
+		return
 	}
 	// we lock because multiple goroutines may use AddChild at the same time
 	defer s.childMutex.Unlock()
@@ -110,7 +111,8 @@ func (s *BundledRequests[ID]) Resolve(id ID) {
 		panic(fmt.Errorf("resolved id is not part of BundledRequests[ID]: %v", id))
 	}
 	if s.fired.Load() {
-		panic("cannot resolve after fired")
+		s.logger.Warn("resolve after fire, no-op")
+		return
 	}
 	s.req <- struct{}{}
 }

@@ -25,22 +25,26 @@ func init() {
 //go:embed caveman_prompt.txt
 var caveman_prompt string
 
-func ask(ctx context.Context, prompt string) (res string, err error) {
+func ask(ctx context.Context, prompts ...string) (res string, err error) {
 	seed := 0
 	temp := float64(0)
 	maxToken := 32
+
+	messages := make([]anyllm.Message, 1+len(prompts))
+	messages[0] = anyllm.Message{
+		Role:    anyllm.RoleSystem,
+		Content: caveman_prompt,
+	}
+	for i, p := range prompts {
+		messages[1+i] = anyllm.Message{
+			Role:    anyllm.RoleUser,
+			Content: p,
+		}
+	}
+
 	response, err := provider.Completion(ctx, anyllm.CompletionParams{
-		Model: "Qwen3.5-4B-Q6_K.gguf",
-		Messages: []anyllm.Message{
-			{
-				Role:    anyllm.RoleSystem,
-				Content: caveman_prompt,
-			},
-			{
-				Role:    anyllm.RoleUser,
-				Content: prompt,
-			},
-		},
+		Model:       "Qwen3.5-4B-Q6_K.gguf",
+		Messages:    messages,
 		Temperature: &temp,
 		MaxTokens:   &maxToken,
 		Seed:        &seed,

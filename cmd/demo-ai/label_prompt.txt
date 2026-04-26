@@ -1,8 +1,14 @@
-context: given AX tree(s) in S expr (:name :role :ignored children...) and previous title
+context: given AX tree(s) in S expr (:name :role :ignored children...)
 
-%s
+task:
 
-task: create brief title for website structure
+- create brief title for website structure
+- no names or content
 
-output: title text only, no explanation, no next step, no "Title: " prefix
+output:
+
+- title text only
+- no explanation
+- no next step
+- no "Title: " prefix
 

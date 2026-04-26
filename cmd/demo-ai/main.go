@@ -26,6 +26,9 @@ import (
 	_ "embed"
 )
 
+// here we assume that: 1 token ~ 4 letters
+const max_context_letters = 50000 * 4
+
 func NewTestBrowser(chromeBin string) (browser *rod.Browser, err error) {
 	dataTemp := "/tmp/ax-distiller/chrome-data"
 	err = os.RemoveAll(dataTemp)
@@ -162,17 +165,16 @@ func main() {
 					go func() {
 						defer wg.Done()
 
-						label, _, err := QueryLabel(ctx, driver, e.hash)
+						_, ok, err := QueryLabel(ctx, driver, e.hash)
 						if err != nil {
 							logger.Error("query db", "err", err)
 							return
 						}
+						if ok {
+							return
+						}
 
 						var body strings.Builder
-						body.WriteString("<prev_title>\n")
-						body.WriteString(label)
-						body.WriteString("\n</prev_title>\n")
-
 						for i := range 3 {
 							if i >= len(e.nodes) {
 								break
@@ -182,8 +184,14 @@ func main() {
 							fmt.Fprintln(&body)
 							fmt.Fprintln(&body, "</ax_tree>")
 						}
-						prompt := fmt.Sprintf(label_prompt, body.String())
-						title, err := ask(ctx, prompt)
+						bodyStr := body.String()
+						if len(bodyStr) > max_context_letters {
+							// we truncate body if we are going to exceed max context
+							bodyStr = bodyStr[:max_context_letters]
+						}
+
+						// break it up into two prompts to enable better prompt caching
+						title, err := ask(ctx, label_prompt, bodyStr)
 						if err != nil {
 							logger.Error("llm ask", "err", err)
 							return
@@ -194,6 +202,7 @@ func main() {
 							logger.Error("insert db", "err", err)
 							return
 						}
+						logger.Info("record label", "hash", e.hash, "title", title)
 					}()
 				}
 				wg.Wait()

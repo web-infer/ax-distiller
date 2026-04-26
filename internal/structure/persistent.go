@@ -4,7 +4,6 @@ import (
 	"ax-distiller/internal/chrome/axstream"
 	"ax-distiller/internal/chrome/cdp"
 	"encoding/binary"
-	"fmt"
 	"iter"
 	"log/slog"
 	"slices"
@@ -202,7 +201,6 @@ func (p *Persistent) HandleEvent(e axstream.Event) {
 		p.logger.Debug("start reset event")
 		clear(p.state)
 		p.Root = p.recomputeNodeStructure(e.Added[0], p.state, true)
-		fmt.Println(p.Root)
 		p.logger.Debug("finish reset event")
 	case axstream.EVENT_PATCH:
 		p.logger.Debug("start patch event")
