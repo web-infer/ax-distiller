@@ -1,0 +1,10 @@
+context: given AX tree in S expr (:name :role :ignored children...)
+
+<ax_tree>
+%s
+</ax_tree>
+
+task: create brief title for website structure
+
+output: title text only, no explanation, no next step, no "Title: " prefix
+
