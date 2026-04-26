@@ -176,7 +176,7 @@ func main() {
 		}
 	}()
 
-	p.MustNavigate("https://amazon.com")
+	p.MustNavigate("https://ocw.mit.edu/search/?d=Mathematics")
 
 	<-ctx.Done()
 }
