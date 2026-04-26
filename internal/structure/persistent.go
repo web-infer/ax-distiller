@@ -55,8 +55,8 @@ type structureEntry struct {
 
 type Persistent struct {
 	Root       *Structure
+	Index      map[uint64][]*cdp.AXNodeWithRelatives
 	logger     *slog.Logger
-	index      map[uint64][]*cdp.AXNode
 	state      map[proto.AccessibilityAXNodeID]*Structure
 	recomputed map[proto.AccessibilityAXNodeID]*Structure
 }
@@ -64,7 +64,7 @@ type Persistent struct {
 func NewPersistent(logger *slog.Logger) *Persistent {
 	return &Persistent{
 		Root:       nil,
-		index:      make(map[uint64][]*cdp.AXNode),
+		Index:      make(map[uint64][]*cdp.AXNodeWithRelatives),
 		state:      make(map[proto.AccessibilityAXNodeID]*Structure),
 		recomputed: make(map[proto.AccessibilityAXNodeID]*Structure),
 		logger:     logger.WithGroup("persistent"),
@@ -112,7 +112,7 @@ func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state
 		}
 	}
 
-	out = &Structure{Underlying: &node.Underlying}
+	out = &Structure{Underlying: node}
 	hashBuff := []byte(node.Underlying.Role.Value)
 
 	var prev *Structure
@@ -140,7 +140,7 @@ func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state
 	}
 
 	out.Hash = xxh3.Hash(hashBuff)
-	p.index[out.Hash] = append(p.index[out.Hash], &node.Underlying)
+	p.Index[out.Hash] = append(p.Index[out.Hash], node)
 
 	// we create synthetic structural wrappers for repeated nodes and patterns
 	// in the children linked list
@@ -175,22 +175,22 @@ func (p *Persistent) reconcileRecomputed() {
 		cleanup:
 			for prevChild := prev.FirstChild; prevChild != nil; prevChild = prevChild.NextSibling {
 				for nextChild := next.FirstChild; nextChild != nil; nextChild = nextChild.NextSibling {
-					if nextChild.Underlying.BackendDOMNodeID == prevChild.Underlying.BackendDOMNodeID {
+					if nextChild.Underlying.Underlying.BackendDOMNodeID == prevChild.Underlying.Underlying.BackendDOMNodeID {
 						continue cleanup
 					}
 				}
-				p.logger.Debug("delete dropped", "node", prevChild.Underlying.BackendDOMNodeID)
+				p.logger.Debug("delete dropped", "node", prevChild.Underlying.Underlying.BackendDOMNodeID)
 
-				instanceList := p.index[prevChild.Hash]
+				instanceList := p.Index[prevChild.Hash]
 				if instanceList != nil {
 					idx := slices.Index(instanceList, prevChild.Underlying)
-					p.index[prevChild.Hash] = slices.Delete(instanceList, idx, idx+1)
+					p.Index[prevChild.Hash] = slices.Delete(instanceList, idx, idx+1)
 				}
-				delete(p.state, prevChild.Underlying.NodeID)
+				delete(p.state, prevChild.Underlying.Underlying.NodeID)
 			}
 		}
 
-		p.logger.Debug("update node", "node", next.Underlying.BackendDOMNodeID)
+		p.logger.Debug("update node", "node", next.Underlying.Underlying.BackendDOMNodeID)
 		p.state[id] = next
 	}
 	clear(p.recomputed)

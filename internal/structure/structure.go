@@ -10,17 +10,21 @@ import (
 	"github.com/zeebo/xxh3"
 )
 
-var synthetic_list = &cdp.AXNode{
-	Role: cdp.Value[string]{Value: "SYNTHETIC_LIST"},
+var synthetic_list = &cdp.AXNodeWithRelatives{
+	Underlying: cdp.AXNode{
+		Role: cdp.Value[string]{Value: "SYNTHETIC_LIST"},
+	},
 }
 
-var synthetic_object = &cdp.AXNode{
-	Role: cdp.Value[string]{Value: "SYNTHETIC_OBJECT"},
+var synthetic_object = &cdp.AXNodeWithRelatives{
+	Underlying: cdp.AXNode{
+		Role: cdp.Value[string]{Value: "SYNTHETIC_OBJECT"},
+	},
 }
 
 type Structure struct {
 	Hash        uint64
-	Underlying  *cdp.AXNode
+	Underlying  *cdp.AXNodeWithRelatives
 	FirstChild  *Structure
 	NextSibling *Structure
 }
@@ -270,7 +274,7 @@ func convertToStructure(start *cdp.AXNodeWithRelatives) (ret *Structure) {
 	for cur := start; cur != nil; cur = cur.NextSibling {
 		fc := Construct(cur.FirstChild)
 		newNode := &Structure{
-			Underlying: &cur.Underlying,
+			Underlying: cur,
 			FirstChild: fc,
 		}
 
@@ -336,9 +340,9 @@ func Construct(current *cdp.AXNodeWithRelatives) (ret *Structure) {
 }
 
 func (s *Structure) Debug() tree.DebugInfo {
-	meta := s.Underlying.Role.Value
+	meta := s.Underlying.Underlying.Role.Value
 	return tree.DebugInfo{
-		Name:     fmt.Sprintf("%v (%v)", s.Hash, s.Underlying.BackendDOMNodeID),
+		Name:     fmt.Sprintf("%v (%v)", s.Hash, s.Underlying.Underlying.BackendDOMNodeID),
 		Metadata: meta,
 	}
 }

@@ -2,6 +2,7 @@ package tree
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/xlab/treeprint"
 )
@@ -117,4 +118,35 @@ func Print(node Node) string {
 	tree := treeprint.New()
 	printInner(node, tree)
 	return tree.String()
+}
+
+func printSExprInner(node Node, out io.Writer) {
+	if node == nil {
+		return
+	}
+	out.Write([]byte("("))
+	debug := node.Debug()
+	fmt.Fprint(out, debug.Name)
+	rel := node.Relatives()
+	if rel.FirstChild != nil {
+		out.Write([]byte(" "))
+	}
+	printSExprInner(rel.FirstChild, out)
+	out.Write([]byte(")"))
+	if rel.NextSibling != nil {
+		out.Write([]byte(" "))
+	}
+	printSExprInner(rel.NextSibling, out)
+}
+
+func PrintSExpr(node Node, out io.Writer) {
+	if node == nil {
+		out.Write([]byte("<nil>"))
+		return
+	}
+	err := DetectCycles(node)
+	if err != nil {
+		panic(err)
+	}
+	printSExprInner(node, out)
 }

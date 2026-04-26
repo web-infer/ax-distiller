@@ -18,9 +18,21 @@ type AXNodeWithRelatives struct {
 	NextSibling *AXNodeWithRelatives
 }
 
+func ellipsis(t string, length int) string {
+	if len(t) > length {
+		return t[:length] + "..."
+	}
+	return t
+}
+
 func (r AXNodeWithRelatives) Debug() tree.DebugInfo {
 	return tree.DebugInfo{
-		Name:     fmt.Sprintf("%v [%v]", r.Underlying.Name.Value, r.Underlying.Ignored),
+		Name: fmt.Sprintf(
+			"%v \"%v\" %v",
+			r.Underlying.Role.Value,
+			ellipsis(r.Underlying.Name.Value, 30),
+			r.Underlying.Ignored,
+		),
 		Metadata: r.Underlying.NodeID,
 	}
 }
