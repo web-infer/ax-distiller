@@ -6,11 +6,16 @@ import (
 	"ax-distiller/internal/chrome/fastclient"
 	"ax-distiller/internal/slogx"
 	"ax-distiller/internal/structure"
+	"ax-distiller/internal/tree"
 	"context"
+	"fmt"
 	"iter"
 	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
+	"sync"
+	"time"
 
 	"github.com/go-rod/rod"
 	rodcdp "github.com/go-rod/rod/lib/cdp"
@@ -91,20 +96,59 @@ func main() {
 		panic(err)
 	}
 
+	timer := time.NewTimer(250 * time.Millisecond)
+	persistLock := sync.Mutex{}
 	persistent := structure.NewPersistent(logger)
+
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case e := <-events:
+				persistLock.Lock()
 				persistent.HandleEvent(e)
 				switch e.Type {
 				case axstream.EVENT_RESET:
 					logger.Info("page reset", "root", persistent.Root.Hash)
+					timer.Reset(250 * time.Millisecond)
 				case axstream.EVENT_PATCH:
 					logger.Info("page updated")
+					timer.Reset(250 * time.Millisecond)
 				}
+				persistLock.Unlock()
+			}
+		}
+	}()
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				persistLock.Lock()
+
+				var keys []uint64
+				for k := range persistent.Index {
+					keys = append(keys, k)
+				}
+				slices.SortFunc(keys, func(a, b uint64) int {
+					return len(persistent.Index[b]) - len(persistent.Index[a])
+				})
+				for _, k := range keys {
+					nodes := persistent.Index[k]
+					fmt.Printf("\nHash -- %v (%v)\n", k, len(nodes))
+					for i := range 3 {
+						if i >= len(nodes) {
+							break
+						}
+						tree.PrintSExpr(nodes[i], os.Stdout)
+						fmt.Println()
+					}
+				}
+
+				persistLock.Unlock()
 			}
 		}
 	}()
