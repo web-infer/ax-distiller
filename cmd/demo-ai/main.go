@@ -159,8 +159,10 @@ func main() {
 							if i >= len(e.nodes) {
 								break
 							}
+							fmt.Fprintln(&examples, "<ax_tree>")
 							tree.PrintSExpr(e.nodes[i], &examples)
 							fmt.Fprintln(&examples)
+							fmt.Fprintln(&examples, "</ax_tree>")
 						}
 						prompt := fmt.Sprintf(label_prompt, examples.String())
 						result := ask(ctx, prompt)

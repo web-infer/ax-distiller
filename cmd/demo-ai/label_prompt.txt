@@ -1,8 +1,6 @@
-context: given AX tree in S expr (:name :role :ignored children...)
+context: given AX tree(s) in S expr (:name :role :ignored children...)
 
-<ax_tree>
 %s
-</ax_tree>
 
 task: create brief title for website structure
 
