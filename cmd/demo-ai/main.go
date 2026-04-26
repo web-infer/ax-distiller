@@ -88,16 +88,25 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
+	driver, err := OpenDB(ctx, logger)
+	if err != nil {
+		logger.Error("open db", "err", err)
+		os.Exit(1)
+	}
+	defer CloseDB(driver)
+
 	browser, err := NewTestBrowser("chromium")
 	if err != nil {
-		panic(err)
+		logger.Error("create browser", "err", err)
+		os.Exit(1)
 	}
 	p := browser.MustPage("about:blank")
 	chrome.DisableUnusedCDP(p)
 
 	events, err := axstream.Listen(ctx, logger, p)
 	if err != nil {
-		panic(err)
+		logger.Error("axstream listen", "err", err)
+		os.Exit(1)
 	}
 
 	timer := time.NewTimer(250 * time.Millisecond)
@@ -147,30 +156,44 @@ func main() {
 				}
 				persistLock.Unlock()
 
-				outputLock := sync.Mutex{}
 				wg := sync.WaitGroup{}
 				wg.Add(len(entries))
 				for _, e := range entries {
 					go func() {
 						defer wg.Done()
 
-						var examples strings.Builder
+						label, _, err := QueryLabel(ctx, driver, e.hash)
+						if err != nil {
+							logger.Error("query db", "err", err)
+							return
+						}
+
+						var body strings.Builder
+						body.WriteString("<prev_title>\n")
+						body.WriteString(label)
+						body.WriteString("\n</prev_title>\n")
+
 						for i := range 3 {
 							if i >= len(e.nodes) {
 								break
 							}
-							fmt.Fprintln(&examples, "<ax_tree>")
-							tree.PrintSExpr(e.nodes[i], &examples)
-							fmt.Fprintln(&examples)
-							fmt.Fprintln(&examples, "</ax_tree>")
+							fmt.Fprintln(&body, "<ax_tree>")
+							tree.PrintSExpr(e.nodes[i], &body)
+							fmt.Fprintln(&body)
+							fmt.Fprintln(&body, "</ax_tree>")
 						}
-						prompt := fmt.Sprintf(label_prompt, examples.String())
-						result := ask(ctx, prompt)
-						outputLock.Lock()
-						fmt.Printf("--- SUMMARY - %v - %v\n", result, e.hash)
-						fmt.Println(e.nodes[0])
-						fmt.Println()
-						outputLock.Unlock()
+						prompt := fmt.Sprintf(label_prompt, body.String())
+						title, err := ask(ctx, prompt)
+						if err != nil {
+							logger.Error("llm ask", "err", err)
+							return
+						}
+
+						err = RecordLabel(ctx, e.hash, title)
+						if err != nil {
+							logger.Error("insert db", "err", err)
+							return
+						}
 					}()
 				}
 				wg.Wait()

@@ -25,7 +25,7 @@ func init() {
 //go:embed caveman_prompt.txt
 var caveman_prompt string
 
-func ask(ctx context.Context, prompt string) string {
+func ask(ctx context.Context, prompt string) (res string, err error) {
 	seed := 0
 	temp := float64(0)
 	maxToken := 32
@@ -46,7 +46,8 @@ func ask(ctx context.Context, prompt string) string {
 		Seed:        &seed,
 	})
 	if err != nil {
-		panic(err)
+		return
 	}
-	return response.Choices[0].Message.Content.(string)
+	res = response.Choices[0].Message.Content.(string)
+	return
 }
