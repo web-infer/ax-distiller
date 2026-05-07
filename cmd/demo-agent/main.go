@@ -154,8 +154,13 @@ func main() {
 	inter := interact.New(p)
 	eng := agent.NewEngine(inter, persistent, events, *maxPages, logger)
 
+	maxTurns := 20
+	if !*headless {
+		maxTurns = 10
+	}
+
 	client := anthropic.NewClient()
-	spawner := agent.NewSpawner(&client, eng, logger)
+	spawner := agent.NewSpawner(&client, eng, logger, maxTurns)
 
 	// periodic token usage reporter
 	go func() {

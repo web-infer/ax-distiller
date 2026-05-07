@@ -27,13 +27,13 @@ type Spawner struct {
 	usage  TokenUsage
 }
 
-func NewSpawner(client *anthropic.Client, engine *Engine, logger *slog.Logger) *Spawner {
+func NewSpawner(client *anthropic.Client, engine *Engine, logger *slog.Logger, maxTurns int) *Spawner {
 	s := &Spawner{
 		client: client,
 		engine: engine,
 		logger: logger,
 	}
-	s.worker = NewWorker(client, engine, logger, &s.usage)
+	s.worker = NewWorker(client, engine, logger, &s.usage, maxTurns)
 	return s
 }
 

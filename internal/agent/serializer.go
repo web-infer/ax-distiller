@@ -7,13 +7,14 @@ import (
 )
 
 type SerializeOptions struct {
-	MaxLines   int
-	MaxDepth   int
-	NameMaxLen int
+	MaxLines     int
+	MaxDepth     int
+	NameMaxLen   int
+	MaxListItems int // max direct children rendered per SYNTHETIC_LIST (0 = unlimited)
 }
 
 func DefaultSerializeOptions() SerializeOptions {
-	return SerializeOptions{MaxLines: 500, MaxDepth: 12, NameMaxLen: 80}
+	return SerializeOptions{MaxLines: 500, MaxDepth: 12, NameMaxLen: 80, MaxListItems: 8}
 }
 
 func Serialize(root *structure.Structure, opts SerializeOptions) string {
@@ -38,18 +39,27 @@ var transparentRoles = map[string]bool{
 }
 
 type stackEntry struct {
-	node  *structure.Structure
-	depth int
+	node             *structure.Structure
+	depth            int
+	suppressSiblings bool
+	truncMsg         string // if non-empty, print this line and skip node rendering
 }
 
 // serializeNode iterates the left-child/right-sibling tree without recursion.
 // Transparent nodes (generic with no name) are collapsed — children promoted to same depth.
 func serializeNode(sb *strings.Builder, root *structure.Structure, count *int, opts SerializeOptions) {
-	stack := []stackEntry{{root, 0}}
+	stack := []stackEntry{{node: root}}
 
 	for len(stack) > 0 && *count < opts.MaxLines {
 		e := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
+
+		// truncation message sentinel
+		if e.truncMsg != "" {
+			fmt.Fprintf(sb, "%s%s\n", strings.Repeat("  ", e.depth), e.truncMsg)
+			*count++
+			continue
+		}
 
 		node, depth := e.node, e.depth
 		if node == nil || depth > opts.MaxDepth {
@@ -65,8 +75,8 @@ func serializeNode(sb *strings.Builder, root *structure.Structure, count *int, o
 		isSynthetic := role == "SYNTHETIC_LIST" || role == "SYNTHETIC_OBJECT"
 
 		// push sibling before processing children (stack is LIFO — sibling processed after subtree)
-		if node.NextSibling != nil {
-			stack = append(stack, stackEntry{node.NextSibling, depth})
+		if !e.suppressSiblings && node.NextSibling != nil {
+			stack = append(stack, stackEntry{node: node.NextSibling, depth: depth})
 		}
 
 		if skipRoles[role] {
@@ -76,7 +86,7 @@ func serializeNode(sb *strings.Builder, root *structure.Structure, count *int, o
 		if transparentRoles[role] && name == "" && !isSynthetic {
 			// collapse: promote children to same depth (not depth+1)
 			if node.FirstChild != nil {
-				stack = append(stack, stackEntry{node.FirstChild, depth})
+				stack = append(stack, stackEntry{node: node.FirstChild, depth: depth, suppressSiblings: e.suppressSiblings})
 			}
 			continue
 		}
@@ -90,9 +100,35 @@ func serializeNode(sb *strings.Builder, root *structure.Structure, count *int, o
 		}
 		*count++
 
-		if node.FirstChild != nil {
-			stack = append(stack, stackEntry{node.FirstChild, depth + 1})
+		if node.FirstChild == nil {
+			continue
 		}
+
+		// cap SYNTHETIC_LIST direct children
+		if role == "SYNTHETIC_LIST" && opts.MaxListItems > 0 {
+			total := 0
+			for c := node.FirstChild; c != nil; c = c.NextSibling {
+				total++
+			}
+			if total > opts.MaxListItems {
+				remaining := total - opts.MaxListItems
+				// push truncation sentinel first (LIFO → printed after all kept children)
+				stack = append(stack, stackEntry{depth: depth + 1, truncMsg: fmt.Sprintf("... (%d more items)", remaining)})
+				// push first MaxListItems children in reverse order with suppressSiblings=true
+				children := make([]*structure.Structure, 0, opts.MaxListItems)
+				c := node.FirstChild
+				for i := 0; i < opts.MaxListItems; i++ {
+					children = append(children, c)
+					c = c.NextSibling
+				}
+				for i := len(children) - 1; i >= 0; i-- {
+					stack = append(stack, stackEntry{node: children[i], depth: depth + 1, suppressSiblings: true})
+				}
+				continue
+			}
+		}
+
+		stack = append(stack, stackEntry{node: node.FirstChild, depth: depth + 1})
 	}
 
 	if *count >= opts.MaxLines {

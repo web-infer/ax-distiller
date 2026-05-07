@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"ax-distiller/internal/structure"
 	"context"
 	"fmt"
 	"log/slog"
@@ -48,17 +49,45 @@ func (e *Executor) ExecDecision(ctx context.Context, d workerDecision) (EngineRe
 	return e.engine.reread(ctx)
 }
 
-// resolveNode uses QueryAXTree to confirm the node exists live.
-// Falls back to hintRole query if the original ID resolves to nothing,
-// otherwise returns the original ID unchanged.
+// resolveNode refreshes a BackendDOMNodeID via a live QueryAXTree lookup.
+// For clicks, it looks up role+name from the persistent tree so that if the
+// page regenerated the element (new BackendDOMNodeID, same role+name), the
+// fresh ID is used for DOM.getBoxModel. Falls back to original ID on any failure.
 func (e *Executor) resolveNode(ctx context.Context, nodeID int64, hintRole, hintName string) int64 {
-	if hintRole == "" && hintName == "" {
+	role, name := hintRole, hintName
+	if role == "" && name == "" {
+		role, name = e.lookupNode(nodeID)
+	}
+	if role == "" && name == "" {
 		return nodeID
 	}
-	found, err := e.engine.inter.FindNode(ctx, hintRole, hintName)
+	found, err := e.engine.inter.FindNode(ctx, role, name)
 	if err != nil || found == 0 {
 		return nodeID
 	}
-	e.logger.Info("executor resolved node via AX query", "original", nodeID, "resolved", found, "role", hintRole)
+	e.logger.Info("executor resolved node via AX query", "original", nodeID, "resolved", found, "role", role, "name", name)
 	return found
+}
+
+// lookupNode walks the persistent structure tree to find role+name for a BackendDOMNodeID.
+func (e *Executor) lookupNode(backendNodeID int64) (role, name string) {
+	root := e.engine.persistent.Root
+	if root == nil {
+		return
+	}
+	stack := []*structure.Structure{root}
+	for len(stack) > 0 {
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if int64(n.Underlying.BackendDOMNodeID) == backendNodeID {
+			return n.Underlying.Role.Value, n.Underlying.Name.Value
+		}
+		if n.NextSibling != nil {
+			stack = append(stack, n.NextSibling)
+		}
+		if n.FirstChild != nil {
+			stack = append(stack, n.FirstChild)
+		}
+	}
+	return
 }

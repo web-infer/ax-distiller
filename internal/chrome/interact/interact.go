@@ -39,15 +39,27 @@ func (i *Interact) Navigate(ctx context.Context, url string) error {
 }
 
 func (i *Interact) Click(ctx context.Context, backendNodeID int64) error {
-	node := &proto.DOMNode{BackendNodeID: proto.DOMBackendNodeID(backendNodeID)}
-	el, err := i.elementFromNode(ctx, node)
+	nid := proto.DOMBackendNodeID(backendNodeID)
+	page := i.Page.Context(ctx)
+
+	// Use DOM.getBoxModel — no execution context required, only BackendNodeID.
+	// Cap at 5s: off-screen or detached nodes can stall indefinitely.
+	boxCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	box, err := cdp.Command[proto.DOMGetBoxModel, proto.DOMGetBoxModelResult](boxCtx, i.Page, proto.DOMGetBoxModel{BackendNodeID: nid})
 	if err != nil {
-		return err
+		return fmt.Errorf("getBoxModel node %d: %w", backendNodeID, err)
 	}
-	if err := el.ScrollIntoView(); err != nil {
-		return err
+
+	// Content quad: [x0,y0, x1,y1, x2,y2, x3,y3] — compute centroid.
+	q := box.Model.Content
+	x := (q[0] + q[2] + q[4] + q[6]) / 4
+	y := (q[1] + q[3] + q[5] + q[7]) / 4
+
+	if err := page.Mouse.MoveTo(proto.Point{X: x, Y: y}); err != nil {
+		return fmt.Errorf("mouse move node %d: %w", backendNodeID, err)
 	}
-	return el.Click(proto.InputMouseButtonLeft, 1)
+	return page.Mouse.Click(proto.InputMouseButtonLeft, 1)
 }
 
 func (i *Interact) Type(ctx context.Context, backendNodeID int64, text string) error {
@@ -63,7 +75,7 @@ func (i *Interact) Type(ctx context.Context, backendNodeID int64, text string) e
 }
 
 // elementFromNode resolves a BackendDOMNodeID to a rod Element, retrying up to
-// 3 times with 600ms backoff to handle stale execution contexts after navigation.
+// 3 times with 600ms backoff. Used by Type — Click bypasses this via DOM.getBoxModel.
 func (i *Interact) elementFromNode(ctx context.Context, node *proto.DOMNode) (*rod.Element, error) {
 	var (
 		el  *rod.Element

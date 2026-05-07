@@ -11,7 +11,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 )
 
-const maxWorkerTurns = 20
+const maxSameURLTurns = 3
 
 type workerDecision struct {
 	Action      string `json:"action"`
@@ -31,15 +31,17 @@ type Worker struct {
 	executor *Executor
 	logger   *slog.Logger
 	usage    *TokenUsage
+	maxTurns int
 }
 
-func NewWorker(client *anthropic.Client, engine *Engine, logger *slog.Logger, usage *TokenUsage) *Worker {
+func NewWorker(client *anthropic.Client, engine *Engine, logger *slog.Logger, usage *TokenUsage, maxTurns int) *Worker {
 	return &Worker{
 		client:   client,
 		engine:   engine,
 		executor: NewExecutor(engine, logger),
 		logger:   logger,
 		usage:    usage,
+		maxTurns: maxTurns,
 	}
 }
 
@@ -55,8 +57,10 @@ func (w *Worker) Run(ctx context.Context, goal, url string) WorkerResult {
 	currentURL := res.URL
 	currentStructure := applyHeuristic(res)
 	pageNum := res.PageNum
+	sameURLCount := 0
+	lastURL := currentURL
 
-	for turn := range maxWorkerTurns {
+	for turn := range w.maxTurns {
 		decision, err := w.decide(ctx, goal, currentURL, pageNum, currentStructure)
 		if err != nil {
 			w.logger.Warn("decide failed", "turn", turn, "err", err)
@@ -87,18 +91,30 @@ func (w *Worker) Run(ctx context.Context, goal, url string) WorkerResult {
 					w.logger.Warn("page limit reached during navigation")
 					return WorkerResult{}
 				}
-				w.logger.Warn("interact failed", "err", err)
+				interactErr := err
+				w.logger.Warn("interact failed", "err", interactErr)
 				if res, err = w.engine.reread(ctx); err != nil {
 					return WorkerResult{}
 				}
 				currentURL = res.URL
 				pageNum = res.PageNum
 				// prepend error AFTER reread so LLM sees both the error and the fresh structure
-				currentStructure = "INTERACTION ERROR: " + err.Error() + "\n\n" + applyHeuristic(res)
+				currentStructure = "INTERACTION ERROR: " + interactErr.Error() + "\n\n" + applyHeuristic(res)
 			} else {
 				currentURL = res.URL
 				currentStructure = applyHeuristic(res)
 				pageNum = res.PageNum
+			}
+
+			if currentURL == lastURL {
+				sameURLCount++
+				if sameURLCount >= maxSameURLTurns {
+					w.logger.Warn("stuck on same URL, giving up", "url", currentURL, "turns", sameURLCount)
+					return WorkerResult{}
+				}
+			} else {
+				sameURLCount = 0
+				lastURL = currentURL
 			}
 
 		default:
@@ -113,11 +129,29 @@ func (w *Worker) Run(ctx context.Context, goal, url string) WorkerResult {
 // applyHeuristic runs deterministic noise pruning on new page loads and
 // re-serializes the pruned tree. In-page interactions (Navigated=false)
 // return the pre-serialized structure unchanged.
+// claudeSerializeOptions is the tighter budget used for LLM-facing output.
+// Raw debug dumps use DefaultSerializeOptions (MaxLines=500) to show the full tree.
+func claudeSerializeOptions() SerializeOptions {
+	return SerializeOptions{MaxLines: 300, MaxDepth: 12, NameMaxLen: 80, MaxListItems: 8}
+}
+
 func applyHeuristic(res EngineResult) string {
 	if !res.Navigated || res.Root == nil {
 		return res.Structure
 	}
-	return Serialize(heuristic.Simplify(res.Root), DefaultSerializeOptions())
+	out := Serialize(heuristic.Simplify(res.Root), claudeSerializeOptions())
+	slog.Info("heuristic", "raw_lines", lineCount(res.Structure), "pruned_lines", lineCount(out))
+	return out
+}
+
+func lineCount(s string) int {
+	n := 0
+	for _, c := range s {
+		if c == '\n' {
+			n++
+		}
+	}
+	return n
 }
 
 func (w *Worker) decide(ctx context.Context, goal, url string, pageNum int, structure string) (workerDecision, error) {
@@ -125,7 +159,7 @@ func (w *Worker) decide(ctx context.Context, goal, url string, pageNum int, stru
 
 	msg, err := w.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.ModelClaudeHaiku4_5,
-		MaxTokens: 512,
+		MaxTokens: 1024,
 		System: []anthropic.TextBlockParam{
 			{Text: workerSystem},
 		},

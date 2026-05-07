@@ -1,0 +1,32 @@
+[
+  {
+    "id": "box_price",
+    "prompt": "find a cardboard box on amazon and give me the price",
+    "expected_contains": ["$", "box"],
+    "difficulty": "easy"
+  },
+  {
+    "id": "bbc_headline",
+    "prompt": "what is the top headline on bbc.com",
+    "expected_contains": [],
+    "difficulty": "easy"
+  },
+  {
+    "id": "laptop_under_500",
+    "prompt": "find a laptop under $500 on amazon, give me the name and price",
+    "expected_contains": ["$", "laptop"],
+    "difficulty": "medium"
+  },
+  {
+    "id": "apple_iphone_price",
+    "prompt": "what is the price of the iPhone 16 on apple.com",
+    "expected_contains": ["$", "iPhone"],
+    "difficulty": "medium"
+  },
+  {
+    "id": "wiki_python",
+    "prompt": "when was the Python programming language first released according to wikipedia",
+    "expected_contains": ["1991", "Python"],
+    "difficulty": "easy"
+  }
+]

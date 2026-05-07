@@ -18,11 +18,22 @@ func stripJSON(s string) string {
 		s = strings.TrimSpace(after)
 	}
 
+	// find first balanced {...} block
 	start := strings.Index(s, "{")
-	end := strings.LastIndex(s, "}")
-	if start != -1 && end != -1 && end >= start {
-		return strings.TrimSpace(s[start : end+1])
+	if start == -1 {
+		return s
 	}
-
+	depth := 0
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return strings.TrimSpace(s[start : i+1])
+			}
+		}
+	}
 	return s
 }

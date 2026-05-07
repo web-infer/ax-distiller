@@ -8,7 +8,8 @@ import (
 // noiseRoles are subtree roots that reliably contain no useful navigation or
 // content for web traversal goals.
 var noiseRoles = map[string]bool{
-	"contentinfo": true, // page footer
+	"contentinfo":   true, // page footer
+	"MenuListPopup": true, // dropdown option lists (dept selectors, sort menus)
 }
 
 // noiseNamePrefixes match accessible names of decorative / accessibility-only
