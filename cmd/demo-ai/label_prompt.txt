@@ -1,9 +1,8 @@
-context: given AX tree(s) in S expr (:name :role :ignored children...)
+context: titles of children AX nodes and their AX roles
 
 task:
 
-- create brief title for website structure
-- no names or content
+- in <10 words, describe type of content in AX node
 
 output:
 

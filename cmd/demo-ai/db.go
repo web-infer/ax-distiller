@@ -131,7 +131,7 @@ func CloseDB(driver *sql.DB) error {
 	return err
 }
 
-func QueryLabel(ctx context.Context, driver *sql.DB, hash uint64) (label string, ok bool, err error) {
+func LookupLabel(ctx context.Context, driver *sql.DB, hash uint64) (label string, ok bool, err error) {
 	hashBuff := binary.BigEndian.AppendUint64([]byte{}, hash)
 	res, err := driver.QueryContext(
 		ctx,

@@ -3,27 +3,22 @@ package main
 import (
 	"ax-distiller/internal/chrome"
 	"ax-distiller/internal/chrome/axstream"
-	"ax-distiller/internal/chrome/cdp"
 	"ax-distiller/internal/chrome/fastclient"
 	"ax-distiller/internal/slogx"
 	"ax-distiller/internal/structure"
-	"ax-distiller/internal/tree"
 	"context"
-	"fmt"
+	"errors"
 	"iter"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-rod/rod"
 	rodcdp "github.com/go-rod/rod/lib/cdp"
 	"github.com/go-rod/rod/lib/launcher"
-
-	_ "embed"
 )
 
 // here we assume that: 1 token ~ 4 letters
@@ -72,17 +67,14 @@ func NewTestBrowser(chromeBin string) (browser *rod.Browser, err error) {
 	return
 }
 
-//go:embed label_prompt.txt
-var label_prompt string
-
 func main() {
 	go func() {
 		http.ListenAndServe("localhost:6060", nil)
 	}()
 
-	logger := slogx.DemoLogger(slog.LevelInfo, func(group string, attrs iter.Seq[slog.Attr]) bool {
+	logger := slogx.DemoLogger(slog.LevelDebug, func(group string, attrs iter.Seq[slog.Attr]) bool {
 		switch group {
-		case "main", "persistent":
+		case "main":
 			return true
 		}
 		return false
@@ -137,6 +129,14 @@ func main() {
 		}
 	}()
 
+	labeler := newLabeler(
+		ctx,
+		logger,
+		driver,
+		persistent,
+		&persistLock,
+	)
+
 	go func() {
 		for {
 			select {
@@ -144,68 +144,23 @@ func main() {
 				return
 			case <-timer.C:
 				persistLock.Lock()
-				type record struct {
-					hash  uint64
-					nodes []*cdp.AXNodeWithRelatives
-				}
-				entries := make([]record, len(persistent.Index))
+				hashes := make([]uint64, len(persistent.Index))
 				i := 0
-				for k := range persistent.Index {
-					entries[i] = record{
-						hash:  k,
-						nodes: persistent.Index[k],
-					}
+				for h := range persistent.Index {
+					hashes[i] = h
 					i++
 				}
 				persistLock.Unlock()
 
-				wg := sync.WaitGroup{}
-				wg.Add(len(entries))
-				for _, e := range entries {
-					go func() {
-						defer wg.Done()
-
-						_, ok, err := QueryLabel(ctx, driver, e.hash)
-						if err != nil {
-							logger.Error("query db", "err", err)
-							return
-						}
-						if ok {
-							return
-						}
-
-						var body strings.Builder
-						for i := range 3 {
-							if i >= len(e.nodes) {
-								break
-							}
-							fmt.Fprintln(&body, "<ax_tree>")
-							tree.PrintSExpr(e.nodes[i], &body)
-							fmt.Fprintln(&body)
-							fmt.Fprintln(&body, "</ax_tree>")
-						}
-						bodyStr := body.String()
-						if len(bodyStr) > max_context_letters {
-							// we truncate body if we are going to exceed max context
-							bodyStr = bodyStr[:max_context_letters]
-						}
-
-						// break it up into two prompts to enable better prompt caching
-						title, err := ask(ctx, label_prompt, bodyStr)
-						if err != nil {
-							logger.Error("llm ask", "err", err)
-							return
-						}
-
-						err = RecordLabel(ctx, e.hash, title)
-						if err != nil {
-							logger.Error("insert db", "err", err)
-							return
-						}
-						logger.Info("record label", "hash", e.hash, "title", title)
-					}()
+				for _, h := range hashes {
+					_, err := labeler.Label(h)
+					if errors.Is(err, context.Canceled) {
+						return
+					}
+					if err != nil {
+						logger.Warn("label failed", "err", err)
+					}
 				}
-				wg.Wait()
 			}
 		}
 	}()

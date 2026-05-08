@@ -54,7 +54,7 @@ type structureEntry struct {
 
 type Persistent struct {
 	Root       *Structure
-	Index      map[uint64][]*cdp.AXNodeWithRelatives
+	Index      map[uint64][]*Structure
 	logger     *slog.Logger
 	state      map[proto.AccessibilityAXNodeID]*Structure
 	recomputed map[proto.AccessibilityAXNodeID]*Structure
@@ -63,7 +63,7 @@ type Persistent struct {
 func NewPersistent(logger *slog.Logger) *Persistent {
 	return &Persistent{
 		Root:       nil,
-		Index:      make(map[uint64][]*cdp.AXNodeWithRelatives),
+		Index:      make(map[uint64][]*Structure),
 		state:      make(map[proto.AccessibilityAXNodeID]*Structure),
 		recomputed: make(map[proto.AccessibilityAXNodeID]*Structure),
 		logger:     logger.WithGroup("persistent"),
@@ -139,7 +139,7 @@ func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state
 	}
 
 	out.Hash = xxh3.Hash(hashBuff)
-	p.Index[out.Hash] = append(p.Index[out.Hash], node)
+	p.Index[out.Hash] = append(p.Index[out.Hash], out)
 
 	// we create synthetic structural wrappers for repeated nodes and patterns
 	// in the children linked list
@@ -182,7 +182,7 @@ func (p *Persistent) reconcileRecomputed() {
 
 				instanceList := p.Index[prevChild.Hash]
 				if instanceList != nil {
-					idx := slices.Index(instanceList, prevChild.Underlying)
+					idx := slices.Index(instanceList, prevChild)
 					p.Index[prevChild.Hash] = slices.Delete(instanceList, idx, idx+1)
 				}
 				delete(p.state, prevChild.Underlying.Underlying.NodeID)

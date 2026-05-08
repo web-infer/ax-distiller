@@ -25,10 +25,9 @@ func init() {
 //go:embed caveman_prompt.txt
 var caveman_prompt string
 
-func ask(ctx context.Context, prompts ...string) (res string, err error) {
+func ask(ctx context.Context, maxToken int, prompts ...string) (res string, err error) {
 	seed := 0
 	temp := float64(0)
-	maxToken := 32
 
 	messages := make([]anyllm.Message, 1+len(prompts))
 	messages[0] = anyllm.Message{
