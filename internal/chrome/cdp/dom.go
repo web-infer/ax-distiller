@@ -73,3 +73,48 @@ func (DOMGetDocument) Call(c proto.Client) (out *DOMGetDocumentResult, err error
 type DOMGetDocumentResult struct {
 	Root *DOMNode `json:"root"`
 }
+
+// DOMResolveNode Resolves the JavaScript node object for a given NodeId or BackendNodeId.
+type DOMResolveNode struct {
+	// NodeID (optional) Id of the node to resolve.
+	NodeID proto.DOMNodeID `json:"nodeId,omitempty"`
+
+	// BackendNodeID (optional) Backend identifier of the node to resolve.
+	BackendNodeID proto.DOMBackendNodeID `json:"backendNodeId,omitempty"`
+
+	// ObjectGroup (optional) Symbolic group name that can be used to release multiple objects.
+	ObjectGroup string `json:"objectGroup,omitempty"`
+
+	// ExecutionContextID (optional) Execution context in which to resolve the node.
+	ExecutionContextID proto.RuntimeExecutionContextID `json:"executionContextId,omitempty"`
+}
+
+// ProtoReq name.
+func (m DOMResolveNode) ProtoReq() string { return "DOM.resolveNode" }
+
+// Call the request.
+func (m DOMResolveNode) Call(c proto.Client) (out *DOMResolveNodeResult, err error) { return }
+
+// DOMResolveNodeResult ...
+type DOMResolveNodeResult struct {
+	// Object JavaScript object wrapper for given node.
+	Object *proto.RuntimeRemoteObject `json:"object"`
+}
+
+// DOMSetAttributeValue Sets attribute for an element with given id.
+type DOMSetAttributeValue struct {
+	// NodeID Id of the element to set attribute for.
+	NodeID proto.DOMNodeID `json:"nodeId"`
+
+	// Name Attribute name.
+	Name string `json:"name"`
+
+	// Value Attribute value.
+	Value string `json:"value"`
+}
+
+// ProtoReq name.
+func (m DOMSetAttributeValue) ProtoReq() string { return "DOM.setAttributeValue" }
+
+// Call sends the request.
+func (m DOMSetAttributeValue) Call(c proto.Client) (err error) { return }

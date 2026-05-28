@@ -70,6 +70,10 @@ func NewPersistent(logger *slog.Logger) *Persistent {
 	}
 }
 
+func (p *Persistent) LookupStructure(id proto.AccessibilityAXNodeID) *Structure {
+	return p.state[id]
+}
+
 func (p *Persistent) isIgnored(node *cdp.AXNodeWithRelatives) bool {
 	return node.Underlying.Ignored ||
 		(node.FirstChild == nil && node.Underlying.Role.Value == "generic") ||
@@ -98,16 +102,12 @@ func (p *Persistent) shallowIterNonIgnoredDescendents(node *cdp.AXNodeWithRelati
 	}
 }
 
-func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state map[proto.AccessibilityAXNodeID]*Structure, nocache bool) (out *Structure) {
-	existing, ok := state[node.Underlying.NodeID]
-	if nocache {
+func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state map[proto.AccessibilityAXNodeID]*Structure, cache bool) (out *Structure) {
+	if cache {
+		existing, ok := state[node.Underlying.NodeID]
 		if ok {
 			out = existing
 			return
-		}
-	} else {
-		if ok {
-			panic("should not hit cache while nocache is enabled!")
 		}
 	}
 
@@ -117,7 +117,7 @@ func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state
 	var prev *Structure
 	for child := range p.shallowIterNonIgnoredDescendents(node) {
 		// single child may return multiple children in linked list (via NextSibling)
-		childStructs := p.recomputeNodeStructure(child, state, nocache)
+		childStructs := p.recomputeNodeStructure(child, state, cache)
 
 		// may return NextSibling != nil, but only if hitting cache
 		// should never hit cache in root
@@ -161,6 +161,11 @@ func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state
 	if out.NextSibling != nil {
 		panic("assert failed: out.NextSibling != nil")
 	}
+
+	if cache {
+		state[node.Underlying.NodeID] = out
+	}
+
 	return
 }
 

@@ -2,7 +2,11 @@ package cdp
 
 import (
 	"ax-distiller/internal/tree"
+	"context"
 	"fmt"
+
+	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/proto"
 )
 
 // AXNodeWithRelatives is an AXNode with a FirstChild and NextSibling pointer
@@ -50,4 +54,33 @@ func (r AXNodeWithRelatives) Relatives() tree.Relatives {
 
 func (r AXNodeWithRelatives) String() string {
 	return tree.Print(r)
+}
+
+func ElementFromAX(ctx context.Context, page *rod.Page, backendNodeID proto.DOMBackendNodeID) (out *rod.Element, err error) {
+	// taken from Page.ElementFromNode
+
+	req := DOMResolveNode{
+		BackendNodeID: backendNodeID,
+	}
+	res, err := Command(ctx, page, req)
+	if err != nil {
+		return
+	}
+
+	el, err := page.ElementFromObject(res.Object)
+	if err != nil {
+		return
+	}
+
+	desc, err := el.Describe(0, false)
+	if err != nil {
+		return
+	}
+	if desc.NodeName == "#text" {
+		el, err = el.Parent()
+		if err != nil {
+			return
+		}
+	}
+	return
 }
