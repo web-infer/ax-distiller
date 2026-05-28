@@ -4,7 +4,6 @@ import (
 	"ax-distiller/internal/chrome/axstream"
 	"ax-distiller/internal/chrome/cdp"
 	"encoding/binary"
-	"iter"
 	"log/slog"
 	"slices"
 
@@ -74,50 +73,27 @@ func (p *Persistent) LookupStructure(id proto.AccessibilityAXNodeID) *Structure 
 	return p.state[id]
 }
 
-func (p *Persistent) isIgnored(node *cdp.AXNodeWithRelatives) bool {
-	return node.Underlying.Ignored ||
-		(node.FirstChild == nil && node.Underlying.Role.Value == "generic") ||
+func isNotIgnored(node *cdp.AXNodeWithRelatives) bool {
+	ignored := node.Underlying.Ignored ||
+		// (node.FirstChild == nil && node.Underlying.Role.Value == "generic") ||
 		(node.FirstChild == nil && node.Underlying.Role.Value == "InlineTextBox")
+	return !ignored
 }
 
-func (p *Persistent) shallowIterNonIgnoredDescendentsInner(node *cdp.AXNodeWithRelatives, yield func(*cdp.AXNodeWithRelatives) bool) {
-	if node == nil {
+func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state map[proto.AccessibilityAXNodeID]*Structure) (out *Structure) {
+	existing, ok := state[node.Underlying.NodeID]
+	if ok {
+		out = existing
 		return
-	}
-	defer p.shallowIterNonIgnoredDescendentsInner(node.NextSibling, yield)
-	if !p.isIgnored(node) {
-		// we always immediately return when finding non-ignored node,
-		// therefore there is no case where a node with a non-ignored ancestor
-		// is yielded
-		yield(node)
-		return
-	}
-	p.shallowIterNonIgnoredDescendentsInner(node.FirstChild, yield)
-}
-
-func (p *Persistent) shallowIterNonIgnoredDescendents(node *cdp.AXNodeWithRelatives) iter.Seq[*cdp.AXNodeWithRelatives] {
-	return func(yield func(*cdp.AXNodeWithRelatives) bool) {
-		// we do not yield() the node itself
-		p.shallowIterNonIgnoredDescendentsInner(node.FirstChild, yield)
-	}
-}
-
-func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state map[proto.AccessibilityAXNodeID]*Structure, cache bool) (out *Structure) {
-	if cache {
-		existing, ok := state[node.Underlying.NodeID]
-		if ok {
-			out = existing
-			return
-		}
 	}
 
 	out = &Structure{Underlying: node}
 	hashBuff := []byte(node.Underlying.Role.Value)
 
 	var prev *Structure
-	for child := range p.shallowIterNonIgnoredDescendents(node) {
+	for child := range cdp.FilterDescendentsShallow(isNotIgnored, node) {
 		// single child may return multiple children in linked list (via NextSibling)
-		childStructs := p.recomputeNodeStructure(child, state, cache)
+		childStructs := p.recomputeNodeStructure(child, state)
 
 		// may return NextSibling != nil, but only if hitting cache
 		// should never hit cache in root
@@ -162,10 +138,7 @@ func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state
 		panic("assert failed: out.NextSibling != nil")
 	}
 
-	if cache {
-		state[node.Underlying.NodeID] = out
-	}
-
+	state[node.Underlying.NodeID] = out
 	return
 }
 
@@ -205,15 +178,15 @@ func (p *Persistent) HandleEvent(e axstream.Event) {
 	case axstream.EVENT_RESET:
 		p.logger.Debug("start reset event")
 		clear(p.state)
-		p.Root = p.recomputeNodeStructure(e.Added[0], p.state, true)
+		p.Root = p.recomputeNodeStructure(e.Added[0], p.state)
 		p.logger.Debug("finish reset event")
 	case axstream.EVENT_PATCH:
 		p.logger.Debug("start patch event")
 		for _, added := range e.Added {
-			p.recomputeNodeStructure(added, p.recomputed, false)
+			p.recomputeNodeStructure(added, p.recomputed)
 		}
 		for _, updated := range e.Updated {
-			p.recomputeNodeStructure(updated, p.recomputed, false)
+			p.recomputeNodeStructure(updated, p.recomputed)
 		}
 		p.reconcileRecomputed()
 		p.logger.Debug("finish patch event")

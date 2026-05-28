@@ -121,6 +121,7 @@ const jsController = `
 		status.innerText = hash
 	}
 
+	let prevEl = null
 	let hashState = ""
 	let prev = Date.now()
 	window.onmousemove = (e) => {
@@ -133,9 +134,17 @@ const jsController = `
 		const id = el.getAttribute("ax-id")
 		if (id === null) {
 			setHash(null)
+			prevId = null
 			return
 		}
+		if (prevEl === el) {
+			return
+		}
+		if (prevEl) prevEl.style.outline = ""
+		prevEl = el
+		prevEl.style.outline = "red solid 1px"
 		window.getStructureHash(id).then((hash) => {
+			if (hashState === hash) { return }
 			hashState = hash
 			setHash(hash)
 		})

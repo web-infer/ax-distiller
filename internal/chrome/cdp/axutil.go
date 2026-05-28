@@ -4,6 +4,7 @@ import (
 	"ax-distiller/internal/tree"
 	"context"
 	"fmt"
+	"iter"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
@@ -83,4 +84,37 @@ func ElementFromAX(ctx context.Context, page *rod.Page, backendNodeID proto.DOMB
 		}
 	}
 	return
+}
+
+func filterDescendentsShallow(
+	filter func(*AXNodeWithRelatives) bool,
+	node *AXNodeWithRelatives,
+	yield func(*AXNodeWithRelatives) bool,
+) {
+	if node == nil {
+		return
+	}
+	if filter(node) {
+		// we always immediately return when finding non-ignored node,
+		// therefore there is no case where a node with a non-ignored ancestor
+		// is yielded
+		stop := !yield(node)
+		if stop {
+			return
+		}
+		filterDescendentsShallow(filter, node.NextSibling, yield)
+		return
+	}
+	filterDescendentsShallow(filter, node.FirstChild, yield)
+	filterDescendentsShallow(filter, node.NextSibling, yield)
+}
+
+func FilterDescendentsShallow(
+	filter func(*AXNodeWithRelatives) bool,
+	node *AXNodeWithRelatives,
+) iter.Seq[*AXNodeWithRelatives] {
+	return func(yield func(*AXNodeWithRelatives) bool) {
+		// we do not yield() the node itself
+		filterDescendentsShallow(filter, node.FirstChild, yield)
+	}
 }
