@@ -230,7 +230,7 @@ func main() {
 
 					initJSClient(ctx, page, persistent)
 				case axstream.EVENT_PATCH:
-					logger.Info("page updated")
+					logger.Info("page updated", "added", len(e.Added), "updated", len(e.Updated))
 					timer.Reset(250 * time.Millisecond)
 				}
 				persistLock.Unlock()

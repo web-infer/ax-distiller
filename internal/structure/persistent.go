@@ -52,9 +52,13 @@ type structureEntry struct {
 }
 
 type Persistent struct {
-	Root       *Structure
-	Index      map[uint64][]*Structure
-	logger     *slog.Logger
+	Root   *Structure
+	Index  map[uint64][]*Structure
+	logger *slog.Logger
+	// we do not actually use state to cache any operations because at any
+	// point an AX node ID can point to a different possible structure, we
+	// simply keep it for reference of the current mapping of AX node to
+	// structure
 	state      map[proto.AccessibilityAXNodeID]*Structure
 	recomputed map[proto.AccessibilityAXNodeID]*Structure
 }
@@ -81,36 +85,33 @@ func isNotIgnored(node *cdp.AXNodeWithRelatives) bool {
 }
 
 func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state map[proto.AccessibilityAXNodeID]*Structure) (out *Structure) {
-	existing, ok := state[node.Underlying.NodeID]
-	if ok {
-		out = existing
-		return
-	}
-
 	out = &Structure{Underlying: node}
 	hashBuff := []byte(node.Underlying.Role.Value)
 
 	var prev *Structure
 	for child := range cdp.FilterDescendentsShallow(isNotIgnored, node) {
+
 		// single child may return multiple children in linked list (via NextSibling)
-		childStructs := p.recomputeNodeStructure(child, state)
+		firstStruct := p.recomputeNodeStructure(child, state)
 
 		// may return NextSibling != nil, but only if hitting cache
 		// should never hit cache in root
 
 		if prev == nil {
 			// set first child to the first childStruct
-			out.FirstChild = childStructs
+			out.FirstChild = firstStruct
 		} else {
 			// set final node of last child's NextSibling to first node of this child
-			prev.NextSibling = childStructs
+			prev.NextSibling = firstStruct
 		}
 
-		for c := childStructs; c != nil; c = c.NextSibling {
+		for str := firstStruct; str != nil; str = str.NextSibling {
 			// add all children hashes to structure
-			hashBuff = binary.LittleEndian.AppendUint64(hashBuff, c.Hash)
-			// prev points to the last node of the child list returned
-			prev = c
+			hashBuff = binary.LittleEndian.AppendUint64(hashBuff, str.Hash)
+			if str.NextSibling == nil {
+				// prev points to the last node of the child list returned
+				prev = str
+			}
 		}
 	}
 
@@ -148,7 +149,8 @@ func (p *Persistent) reconcileRecomputed() {
 
 		// if update
 		if ok {
-			// delete all previous children from map which are not in recomputed node's children
+			// delete all previous children from state map which are not in
+			// recomputed node's children
 		cleanup:
 			for prevChild := prev.FirstChild; prevChild != nil; prevChild = prevChild.NextSibling {
 				for nextChild := next.FirstChild; nextChild != nil; nextChild = nextChild.NextSibling {
@@ -156,18 +158,16 @@ func (p *Persistent) reconcileRecomputed() {
 						continue cleanup
 					}
 				}
-				p.logger.Debug("delete dropped", "node", prevChild.Underlying.Underlying.BackendDOMNodeID)
 
 				instanceList := p.Index[prevChild.Hash]
-				if instanceList != nil {
-					idx := slices.Index(instanceList, prevChild)
+				idx := slices.Index(instanceList, prevChild)
+				if idx >= 0 {
 					p.Index[prevChild.Hash] = slices.Delete(instanceList, idx, idx+1)
 				}
 				delete(p.state, prevChild.Underlying.Underlying.NodeID)
 			}
 		}
 
-		p.logger.Debug("update node", "node", next.Underlying.Underlying.BackendDOMNodeID)
 		p.state[id] = next
 	}
 	clear(p.recomputed)
