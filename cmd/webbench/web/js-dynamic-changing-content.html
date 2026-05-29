@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JS Dynamic Changing Content</title>
+</head>
+
+<body>
+  <button id="expand">expand</button>
+  <button id="clear">clear</button>
+
+  <ul id="target">
+  </ul>
+
+  <script>
+    const target = document.getElementById("target")
+    const expand = document.getElementById("expand")
+    const clear = document.getElementById("clear")
+
+    const opt = (name) => {
+      const item = document.createElement("li")
+      item.innerText = name
+      return item
+    }
+
+    let index = 0
+    expand.onclick = () => {
+      target.append(
+        opt(`entry ${index++}`),
+        opt(`entry ${index++}`),
+        opt(`entry ${index++}`),
+      )
+    }
+    clear.onclick = () => {
+      target.replaceChildren()
+      index = 0
+    }
+  </script>
+</body>
+</html>
