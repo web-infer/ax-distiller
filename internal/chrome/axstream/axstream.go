@@ -18,8 +18,9 @@ const (
 
 // Event represents an AX tree mutation event.
 type Event struct {
-	Type    EventType
-	Added   []*cdp.AXNodeWithRelatives
+	Type EventType
+	// Updated is a list of AX nodes that have changed in some way, either 1)
+	// metadata updating 2) children updating
 	Updated []*cdp.AXNodeWithRelatives
 }
 

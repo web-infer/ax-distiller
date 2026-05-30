@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JS Move Element</title>
+</head>
+
+<body>
+  <div id="container-first" style="min-height: 1rem; border: 1px solid red">
+    <p style="margin: 0" id="target">element</p>
+  </div>
+  <div id="container-second" style="min-height: 1rem; border: 1px solid blue">
+  </div>
+  <button id="move">move to other container</button>
+
+  <script>
+    const move = document.getElementById("move")
+    const containerFirst = document.getElementById("container-first")
+    const containerSecond = document.getElementById("container-second")
+
+    move.onclick = () => {
+      if (containerFirst.children.length > 0) {
+        containerSecond.append(containerFirst.children[0])
+      } else {
+        containerFirst.append(containerSecond.children[0])
+      }
+    }
+  </script>
+</body>
+</html>

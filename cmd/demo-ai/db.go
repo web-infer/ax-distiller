@@ -57,7 +57,10 @@ func recordWriteWorker(ctx context.Context, driver *sql.DB, logger *slog.Logger)
 		case <-ctx.Done():
 			close(recordWrites)
 			return
-		case l := <-recordWrites:
+		case l, ok := <-recordWrites:
+			if !ok {
+				break
+			}
 			recordWrite(ctx, driver, logger, l)
 		}
 	}

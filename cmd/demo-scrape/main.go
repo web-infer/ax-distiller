@@ -13,13 +13,14 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
-	"time"
 
 	"github.com/go-rod/rod"
 	rodcdp "github.com/go-rod/rod/lib/cdp"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
+	"github.com/go-rod/stealth"
 	"github.com/ysmood/gson"
 )
 
@@ -71,23 +72,75 @@ func setAttrWorker(ctx context.Context, page *rod.Page, logger *slog.Logger, req
 		select {
 		case <-ctx.Done():
 			return
-		case r := <-reqs:
+		case node, ok := <-reqs:
+			if !ok {
+				return
+			}
 			pushReq := proto.DOMPushNodesByBackendIDsToFrontend{
 				BackendNodeIDs: []proto.DOMBackendNodeID{
-					r.Underlying.BackendDOMNodeID,
+					node.Underlying.BackendDOMNodeID,
 				},
 			}
 			pushRes, err := cdp.Command(ctx, page, pushReq)
 			if err != nil {
+				logger.Warn("push failure", "err", err, "role", node.Underlying.Role.Value)
 				continue
 			}
+
 			req := cdp.DOMSetAttributeValue{
 				NodeID: pushRes.NodeIDs[0],
 				Name:   "ax-id",
-				Value:  string(r.Underlying.NodeID),
+				Value:  string(node.Underlying.NodeID),
 			}
 			err = cdp.CommandUnary(ctx, page, req)
 			if err != nil {
+				if strings.Contains(err.Error(), "shadow trees") {
+					/*
+						req := proto.DOMGetOuterHTML{
+							BackendNodeID: node.Underlying.BackendDOMNodeID,
+						}
+						var res proto.DOMGetOuterHTMLResult
+						res, err = cdp.Command(ctx, page, req)
+						if err != nil {
+							return
+						}
+
+						logger.Warn(fmt.Sprintf(
+							"shadow tree (%v %v): %v",
+							node.Underlying.Role.Value,
+							node.Underlying.BackendDOMNodeID,
+							&cdp.AXNodeWithRelatives{
+								Underlying: node.Underlying,
+								FirstChild: node.FirstChild,
+							},
+						), "html", res.OuterHTML)
+					*/
+					continue
+				}
+				if strings.Contains(err.Error(), "edit pseudo elements") {
+					/*
+						req := proto.DOMGetOuterHTML{
+							BackendNodeID: node.Underlying.BackendDOMNodeID,
+						}
+						var res proto.DOMGetOuterHTMLResult
+						res, err = cdp.Command(ctx, page, req)
+						if err != nil {
+							return
+						}
+
+						logger.Warn(fmt.Sprintf(
+							"pseudo el (%v %v): %v",
+							node.Underlying.Role.Value,
+							node.Underlying.BackendDOMNodeID,
+							&cdp.AXNodeWithRelatives{
+								Underlying: node.Underlying,
+								FirstChild: node.FirstChild,
+							},
+						), "html", res.OuterHTML)
+					*/
+					continue
+				}
+				logger.Warn(fmt.Sprintf("set attr failure: %v", node), "err", err)
 				continue
 			}
 		}
@@ -101,7 +154,16 @@ func setAttr(reqs chan<- *cdp.AXNodeWithRelatives, node *cdp.AXNodeWithRelatives
 	if node.Underlying.BackendDOMNodeID < 0 {
 		return
 	}
-	reqs <- node
+	switch node.Underlying.Role.Value {
+	case "InlineTextBox", "StaticText":
+		return
+	case "RootWebArea":
+	default:
+		if !node.Underlying.Ignored {
+			reqs <- node
+		}
+	}
+
 	setAttr(reqs, node.FirstChild)
 	setAttr(reqs, node.NextSibling)
 }
@@ -123,13 +185,7 @@ const jsController = `
 
 	let prevEl = null
 	let hashState = ""
-	let prev = Date.now()
 	window.onmousemove = (e) => {
-		const now = Date.now()
-		if (now - prev < 50) {
-			return
-		}
-		prev = now
 		const el = document.elementFromPoint(e.clientX, e.clientY)
 		const id = el.getAttribute("ax-id")
 		if (id === null) {
@@ -159,17 +215,27 @@ const jsController = `
 }
 `
 
-func initJSClient(ctx context.Context, page *rod.Page, persistent *structure.Persistent) (err error) {
-	page.MustEval(jsController)
+func initPageJS(ctx context.Context, page *rod.Page, persistent *structure.Persistent, persistLock *sync.Mutex) (err error) {
+	_, err = page.Eval(jsController)
+	if err != nil {
+		return
+	}
 
-	page.MustExpose("getStructureHash", func(j gson.JSON) (interface{}, error) {
+	_, err = page.Expose("getStructureHash", func(j gson.JSON) (any, error) {
 		axId := j.Str()
+
+		persistLock.Lock()
 		structure := persistent.LookupStructure(proto.AccessibilityAXNodeID(axId))
+		persistLock.Unlock()
 		if structure == nil {
 			return nil, nil
 		}
+
 		return fmt.Sprint(structure.Hash), nil
 	})
+	if err != nil {
+		return
+	}
 
 	depth := 1
 	_, err = cdp.Command(ctx, page, proto.DOMGetDocument{
@@ -180,6 +246,15 @@ func initJSClient(ctx context.Context, page *rod.Page, persistent *structure.Per
 	}
 
 	return
+}
+
+func visit(node *cdp.AXNodeWithRelatives, visitor func(*cdp.AXNodeWithRelatives)) {
+	if node == nil {
+		return
+	}
+	visitor(node)
+	visit(node.FirstChild, visitor)
+	visit(node.NextSibling, visitor)
 }
 
 func main() {
@@ -198,7 +273,9 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	page := browser.MustPage("about:blank")
+	defer browser.Close()
+
+	page := stealth.MustPage(browser)
 	chrome.DisableUnusedCDP(page)
 
 	events, err := axstream.Listen(ctx, logger, page)
@@ -211,7 +288,6 @@ func main() {
 		go setAttrWorker(ctx, page, logger, setAttrReqs)
 	}
 
-	timer := time.NewTimer(250 * time.Millisecond)
 	persistLock := sync.Mutex{}
 	persistent := structure.NewPersistent(logger)
 
@@ -220,64 +296,42 @@ func main() {
 			select {
 			case <-ctx.Done():
 				return
-			case e := <-events:
+			case e, ok := <-events:
+				if !ok {
+					return
+				}
 				persistLock.Lock()
 				persistent.HandleEvent(e)
+				persistLock.Unlock()
+
 				switch e.Type {
 				case axstream.EVENT_RESET:
 					logger.Info("page reset", "root", persistent.Root.Hash)
-					timer.Reset(250 * time.Millisecond)
 
-					initJSClient(ctx, page, persistent)
+					err = initPageJS(ctx, page, persistent, &persistLock)
+					if err != nil {
+						return
+					}
 				case axstream.EVENT_PATCH:
-					logger.Info("page updated", "added", len(e.Added), "updated", len(e.Updated))
-					timer.Reset(250 * time.Millisecond)
+					logger.Info("page updated", "updated", len(e.Updated))
 				}
-				persistLock.Unlock()
 
-				for _, node := range e.Added {
-					go setAttr(setAttrReqs, node)
-				}
 				for _, node := range e.Updated {
 					go setAttr(setAttrReqs, node)
+					logger.Info("updated", "role", node.Underlying.Role.Value, "id", node.Underlying.NodeID)
+					visit(node, func(awr *cdp.AXNodeWithRelatives) {
+						if awr.Underlying.Role.Value == "listbox" || awr.Underlying.Role.Value == "option" {
+							fmt.Println(awr)
+						}
+					})
 				}
 			}
 		}
 	}()
 
-	// go func() {
-	// 	for {
-	// 		select {
-	// 		case <-ctx.Done():
-	// 			return
-	// 		case <-timer.C:
-	// 			persistLock.Lock()
-	//
-	// 			var keys []uint64
-	// 			for k := range persistent.Index {
-	// 				keys = append(keys, k)
-	// 			}
-	// 			slices.SortFunc(keys, func(a, b uint64) int {
-	// 				return len(persistent.Index[b]) - len(persistent.Index[a])
-	// 			})
-	// 			for _, k := range keys {
-	// 				nodes := persistent.Index[k]
-	// 				fmt.Printf("\nHash -- %v (%v)\n", k, len(nodes))
-	// 				for i := range 3 {
-	// 					if i >= len(nodes) {
-	// 						break
-	// 					}
-	// 					tree.PrintSExpr(nodes[i], os.Stdout)
-	// 					fmt.Println()
-	// 				}
-	// 			}
-	//
-	// 			persistLock.Unlock()
-	// 		}
-	// 	}
-	// }()
-
-	page.MustNavigate("https://www.google.com/travel/flights")
+	page.MustNavigate("http://localhost:8080")
+	// page.MustNavigate("https://www.google.com/travel/flights")
+	// page.MustNavigate("https://amazon.com")
 
 	<-ctx.Done()
 }

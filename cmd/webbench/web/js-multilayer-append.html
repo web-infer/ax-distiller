@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JS Multilayer Append</title>
+</head>
+
+<body>
+  <div id="container-outer" style="border: 1px solid red">
+    <div id="container-inner" style="border: 1px solid blue">
+    </div>
+  </div>
+  <button id="change-multilayer">append multilayer</button>
+
+  <script>
+    const p = (text) => {
+      const p = document.createElement("p")
+      p.style.margin = "0"
+      p.innerText = text
+      return p
+    }
+
+    const changeMultilayer = document.getElementById("change-multilayer")
+    const containerOuter = document.getElementById("container-outer")
+    const containerInner = document.getElementById("container-inner")
+
+    changeMultilayer.onclick = () => {
+      containerOuter.append(p("outer child"))
+      containerInner.append(p("inner child"))
+    }
+  </script>
+</body>
+</html>

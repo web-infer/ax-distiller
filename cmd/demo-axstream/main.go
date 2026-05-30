@@ -61,7 +61,8 @@ func NewTestBrowser(chromeBin string) (browser *rod.Browser, err error) {
 
 func main() {
 	logger := slogx.DemoLogger(slog.LevelInfo, func(group string, attrs iter.Seq[slog.Attr]) bool {
-		return group == "main"
+		// return group == "main"
+		return true
 	})
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
@@ -82,18 +83,21 @@ func main() {
 			select {
 			case <-ctx.Done():
 				return
-			case e := <-events:
+			case e, ok := <-events:
+				if !ok {
+					break
+				}
 				switch e.Type {
 				case axstream.EVENT_RESET:
 					logger.Info("reset")
 				case axstream.EVENT_PATCH:
-					logger.Info("patch", "added", len(e.Added), "updated", len(e.Updated))
+					logger.Info("patch", "updated", len(e.Updated))
 				}
 			}
 		}
 	}()
 
-	p.MustNavigate("https://amazon.com")
+	p.MustNavigate("http://localhost:8080")
 
 	<-ctx.Done()
 }

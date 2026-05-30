@@ -40,7 +40,10 @@ func main() {
 		select {
 		case <-ctx.Done():
 			return
-		case msg := <-events:
+		case msg, ok := <-events:
+			if !ok {
+				break
+			}
 			method := msg.Method
 			buff := reflect.ValueOf(msg).Elem().FieldByName("data").Bytes()
 			switch method {

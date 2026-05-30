@@ -113,7 +113,10 @@ func main() {
 			select {
 			case <-ctx.Done():
 				return
-			case e := <-events:
+			case e, ok := <-events:
+				if !ok {
+					break
+				}
 				persistLock.Lock()
 				persistent.HandleEvent(e)
 				switch e.Type {

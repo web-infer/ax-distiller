@@ -178,13 +178,10 @@ func (p *Persistent) HandleEvent(e axstream.Event) {
 	case axstream.EVENT_RESET:
 		p.logger.Debug("start reset event")
 		clear(p.state)
-		p.Root = p.recomputeNodeStructure(e.Added[0], p.state)
+		p.Root = p.recomputeNodeStructure(e.Updated[0], p.state)
 		p.logger.Debug("finish reset event")
 	case axstream.EVENT_PATCH:
 		p.logger.Debug("start patch event")
-		for _, added := range e.Added {
-			p.recomputeNodeStructure(added, p.recomputed)
-		}
 		for _, updated := range e.Updated {
 			p.recomputeNodeStructure(updated, p.recomputed)
 		}

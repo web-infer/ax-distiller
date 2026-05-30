@@ -25,10 +25,9 @@ type listener struct {
 
 	// allocated on init, immutable
 	cdpResPool *sync.Pool
-	subs       chan subReq
 
 	// mutable treeState, reset on page reset
-	treeState *listenerPageState
+	treeState *listenerTreeState
 }
 
 func newListener(ctx context.Context, logger *slog.Logger, out chan<- Event, page *rod.Page) listener {
@@ -44,14 +43,11 @@ func newListener(ctx context.Context, logger *slog.Logger, out chan<- Event, pag
 				}
 			},
 		},
-		subs: make(chan subReq, sub_channel_buffer_size),
 	}
+
+	l.logger.Debug("init page state")
 	l.treeState = newListenerPageState(l)
-	for range sub_worker_count {
-		// this is a worker that is in charge of subscribing to newly found
-		// discovered nodes from events
-		go l.subscriberWorker()
-	}
+
 	// we do not spawn multiple event workers because events must be handled in
 	// order (ex. some node is deleted and re-inserted with a different tree,
 	// if this ordering is corrupted catastrophic results will follow)
@@ -62,6 +58,7 @@ func newListener(ctx context.Context, logger *slog.Logger, out chan<- Event, pag
 	// backpressure mechanism (to stop event loop from sending more work to the
 	// subscription workers if they cannot keep up & prevent potential memory
 	// usage skyrocketing)
+	l.logger.Debug("init event source worker")
 	go l.eventSourceWorker()
 	return l
 }

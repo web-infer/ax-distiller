@@ -40,7 +40,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	page := browser.MustPage("https://amazon.com")
+	page := browser.MustPage("http://localhost:8080")
 
 	err = cdp.CommandUnary(ctx, page, proto.AccessibilityEnable{})
 	if err != nil {
@@ -91,7 +91,10 @@ func main() {
 				select {
 				case <-ctx.Done():
 					return
-				case target := <-subscriptions:
+				case target, ok := <-subscriptions:
+					if !ok {
+						break
+					}
 					if subctx.Err() != nil {
 						continue
 					}
@@ -132,7 +135,10 @@ func main() {
 		select {
 		case <-ctx.Done():
 			return
-		case msg := <-events:
+		case msg, ok := <-events:
+			if !ok {
+				break
+			}
 			method := msg.Method
 			buff := reflect.ValueOf(msg).Elem().FieldByName("data").Bytes()
 			switch method {
@@ -175,11 +181,10 @@ func main() {
 				}
 
 				// debugging
-				ids := make([]proto.DOMBackendNodeID, len(nodes.Nodes))
-				for i, n := range nodes.Nodes {
-					ids[i] = n.BackendDOMNodeID
+				for _, updated := range nodes.Nodes {
+					slog.Info("changed", "node", updated)
 				}
-				slog.Info("Accessibility.nodesUpdated", "updated_nodes", ids)
+				slog.Info("Accessibility.nodesUpdated", "updated", len(nodes.Nodes))
 			}
 		}
 	}

@@ -10,7 +10,7 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 )
 
-type listenerPageState struct {
+type listenerTreeState struct {
 	listener listener
 
 	mutex sync.Mutex
@@ -21,9 +21,9 @@ type listenerPageState struct {
 	nodes         map[proto.AccessibilityAXNodeID]cdp.AXNode
 }
 
-func newListenerPageState(l listener) *listenerPageState {
+func newListenerPageState(l listener) *listenerTreeState {
 	pageCtx, pageCancel := context.WithCancel(l.ctx)
-	return &listenerPageState{
+	return &listenerTreeState{
 		listener:      l,
 		pageCtx:       pageCtx,
 		pageCtxCancel: pageCancel,
@@ -31,15 +31,15 @@ func newListenerPageState(l listener) *listenerPageState {
 	}
 }
 
-func (s *listenerPageState) PageID() uint32 {
+func (s *listenerTreeState) PageID() uint32 {
 	return atomic.LoadUint32(&s.pageID)
 }
 
-func (s *listenerPageState) PageContext() context.Context {
+func (s *listenerTreeState) PageContext() context.Context {
 	return s.pageCtx
 }
 
-func (s *listenerPageState) PageReset(root cdp.AXNode) {
+func (s *listenerTreeState) PageReset(root cdp.AXNode) {
 	defer s.mutex.Unlock()
 	s.mutex.Lock()
 
@@ -60,24 +60,33 @@ func (s *listenerPageState) PageReset(root cdp.AXNode) {
 	s.nodes[root.NodeID] = root
 }
 
-func (s *listenerPageState) UpdateNode(pageID uint32, n cdp.AXNode) (existing, ok bool) {
+func (s *listenerTreeState) GetNode(id proto.AccessibilityAXNodeID) (cdp.AXNode, bool) {
+	defer s.mutex.Unlock()
+	s.mutex.Lock()
+	node, ok := s.nodes[id]
+	return node, ok
+}
+
+// overriden -> true if node already existed before updating, false if new node
+// success -> true if not abort, false if abort
+func (s *listenerTreeState) UpdateNode(pageID uint32, n cdp.AXNode) (overriden, success bool) {
 	defer s.mutex.Unlock()
 	s.mutex.Lock()
 
 	if pageID != s.pageID {
 		return
 	}
-	_, existing = s.nodes[n.NodeID]
+	_, overriden = s.nodes[n.NodeID]
 
 	// same cloning logic here as the one in PageReset()
 	n.ChildIDs = slices.Clone(n.ChildIDs)
 	s.nodes[n.NodeID] = n
 
-	ok = true
+	success = true
 	return
 }
 
-func (s *listenerPageState) GetTree(pageID uint32, id proto.AccessibilityAXNodeID) (tree *cdp.AXNodeWithRelatives, ok bool) {
+func (s *listenerTreeState) GetTree(pageID uint32, id proto.AccessibilityAXNodeID) (tree *cdp.AXNodeWithRelatives, ok bool) {
 	// we lock nodes while running getTree because:
 	// 1. getTree is only ever called from one goroutine
 	// 2. nodes, which getTree reads is also written concurrently from subscribers
@@ -95,7 +104,7 @@ func (s *listenerPageState) GetTree(pageID uint32, id proto.AccessibilityAXNodeI
 }
 
 // we assume no cycles exist in the tree, cycle detection is too expensive
-func (s *listenerPageState) getTreeInner(id proto.AccessibilityAXNodeID) *cdp.AXNodeWithRelatives {
+func (s *listenerTreeState) getTreeInner(id proto.AccessibilityAXNodeID) *cdp.AXNodeWithRelatives {
 	// here, a child not existing is the same semantically as a child that is
 	// not yet loaded, thus we treat them same
 	node, exists := s.nodes[id]

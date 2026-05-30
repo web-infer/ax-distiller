@@ -19,6 +19,14 @@ type AXNode struct {
 	ChildIDs []proto.AccessibilityAXNodeID `json:"childIds,omitempty"`
 }
 
+// MetaEqual returns true if all metadata fields are equal between the node and
+// other. This does not include the node IDs.
+func (n AXNode) MetaEqual(other AXNode) bool {
+	return n.Ignored == other.Ignored &&
+		n.Role == other.Role &&
+		n.Name == other.Name
+}
+
 type AXNodesResult struct {
 	Nodes []AXNode `json:"nodes"`
 }
