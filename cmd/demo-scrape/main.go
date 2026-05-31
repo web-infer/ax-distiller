@@ -5,6 +5,7 @@ import (
 	"ax-distiller/internal/chrome/axstream"
 	"ax-distiller/internal/chrome/cdp"
 	"ax-distiller/internal/slogx"
+	"ax-distiller/internal/stealth"
 	"ax-distiller/internal/structure"
 	"context"
 	"fmt"
@@ -195,6 +196,11 @@ func main() {
 	page := browser.MustPage("about:blank")
 	chrome.DisableUnusedCDP(page)
 
+	_, err = page.EvalOnNewDocument(stealth.JSExpr)
+	if err != nil {
+		panic(err)
+	}
+
 	events, err := axstream.Listen(ctx, logger, page)
 	if err != nil {
 		panic(err)
@@ -207,19 +213,6 @@ func main() {
 
 	persistLock := sync.Mutex{}
 	persistent := structure.NewPersistent(logger)
-
-	navStart := make(chan struct{})
-	go pageLifecycleWorker(page, logger, navStart)
-	go jsInitWorker(page, navStart, func() bool {
-		err = initPageJS(page, persistent, &persistLock)
-		if err != nil {
-			logger.Error("init err", "err", err)
-		}
-		if err == nil {
-			logger.Info("init properly")
-		}
-		return err == nil
-	})
 
 	go func() {
 		for {
@@ -238,13 +231,16 @@ func main() {
 				case axstream.EVENT_RESET:
 					logger.Info("page reset", "root", persistent.Root.Hash)
 
+					err = initPageJS(page, logger, persistent, &persistLock)
+					if err != nil {
+						panic(err)
+					}
 				case axstream.EVENT_PATCH:
 					logger.Info("page updated", "updated", len(e.Updated))
 				}
 
 				for _, node := range e.Updated {
 					go setAttr(setAttrReqs, node)
-					logger.Info("updated", "role", node.Underlying.Role.Value, "id", node.Underlying.NodeID)
 				}
 			}
 		}
