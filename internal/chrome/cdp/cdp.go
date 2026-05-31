@@ -7,8 +7,8 @@ import (
 	"fmt"
 
 	"github.com/bytedance/sonic"
-	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/proto"
+	"github.com/LQR471814/rod"
+	"github.com/LQR471814/rod/lib/proto"
 )
 
 type Request[T any] interface {

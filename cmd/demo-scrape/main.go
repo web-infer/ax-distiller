@@ -4,7 +4,6 @@ import (
 	"ax-distiller/internal/chrome"
 	"ax-distiller/internal/chrome/axstream"
 	"ax-distiller/internal/chrome/cdp"
-	"ax-distiller/internal/chrome/fastclient"
 	"ax-distiller/internal/slogx"
 	"ax-distiller/internal/structure"
 	"context"
@@ -16,12 +15,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/go-rod/rod"
-	rodcdp "github.com/go-rod/rod/lib/cdp"
-	"github.com/go-rod/rod/lib/launcher"
-	"github.com/go-rod/rod/lib/proto"
-	"github.com/go-rod/stealth"
-	"github.com/ysmood/gson"
+	"github.com/LQR471814/rod"
+	rodcdp "github.com/LQR471814/rod/lib/cdp"
+	"github.com/LQR471814/rod/lib/launcher"
+	"github.com/LQR471814/rod/lib/proto"
 )
 
 func NewTestBrowser(chromeBin string) (browser *rod.Browser, err error) {
@@ -55,7 +52,7 @@ func NewTestBrowser(chromeBin string) (browser *rod.Browser, err error) {
 
 	controlURL := launch.MustLaunch()
 	browser = rod.New()
-	client := fastclient.New()
+	client := rodcdp.New()
 	ws := &rodcdp.WebSocket{}
 	err = ws.Connect(browser.GetContext(), controlURL, nil)
 	if err != nil {
@@ -168,86 +165,6 @@ func setAttr(reqs chan<- *cdp.AXNodeWithRelatives, node *cdp.AXNodeWithRelatives
 	setAttr(reqs, node.NextSibling)
 }
 
-const jsController = `
-() => {
-	const status = document.createElement("p")
-	status.style.position = "fixed"
-	status.style.bottom = "0px"
-	status.style.right = "30vw"
-	status.style.background = "white"
-	status.style.color = "black"
-	status.style.padding = "0.05rem"
-	document.body.append(status)
-
-	const setHash = (hash) => {
-		status.innerText = hash
-	}
-
-	let prevEl = null
-	let hashState = ""
-	window.onmousemove = (e) => {
-		const el = document.elementFromPoint(e.clientX, e.clientY)
-		const id = el.getAttribute("ax-id")
-		if (id === null) {
-			setHash(null)
-			prevId = null
-			return
-		}
-		if (prevEl === el) {
-			return
-		}
-		if (prevEl) prevEl.style.outline = ""
-		prevEl = el
-		prevEl.style.outline = "red solid 1px"
-		window.getStructureHash(id).then((hash) => {
-			if (hashState === hash) { return }
-			hashState = hash
-			setHash(hash)
-		})
-	}
-
-	window.onkeydown = (e) => {
-		if (e.key === "c" && e.altKey) {
-			navigator.clipboard.writeText(hashState)
-			setHash("copied: " + hashState)
-		}
-	}
-}
-`
-
-func initPageJS(ctx context.Context, page *rod.Page, persistent *structure.Persistent, persistLock *sync.Mutex) (err error) {
-	_, err = page.Eval(jsController)
-	if err != nil {
-		return
-	}
-
-	_, err = page.Expose("getStructureHash", func(j gson.JSON) (any, error) {
-		axId := j.Str()
-
-		persistLock.Lock()
-		structure := persistent.LookupStructure(proto.AccessibilityAXNodeID(axId))
-		persistLock.Unlock()
-		if structure == nil {
-			return nil, nil
-		}
-
-		return fmt.Sprint(structure.Hash), nil
-	})
-	if err != nil {
-		return
-	}
-
-	depth := 1
-	_, err = cdp.Command(ctx, page, proto.DOMGetDocument{
-		Depth: &depth,
-	})
-	if err != nil {
-		return
-	}
-
-	return
-}
-
 func visit(node *cdp.AXNodeWithRelatives, visitor func(*cdp.AXNodeWithRelatives)) {
 	if node == nil {
 		return
@@ -275,7 +192,7 @@ func main() {
 	}
 	defer browser.Close()
 
-	page := stealth.MustPage(browser)
+	page := browser.MustPage("about:blank")
 	chrome.DisableUnusedCDP(page)
 
 	events, err := axstream.Listen(ctx, logger, page)
@@ -290,6 +207,19 @@ func main() {
 
 	persistLock := sync.Mutex{}
 	persistent := structure.NewPersistent(logger)
+
+	navStart := make(chan struct{})
+	go pageLifecycleWorker(page, logger, navStart)
+	go jsInitWorker(page, navStart, func() bool {
+		err = initPageJS(page, persistent, &persistLock)
+		if err != nil {
+			logger.Error("init err", "err", err)
+		}
+		if err == nil {
+			logger.Info("init properly")
+		}
+		return err == nil
+	})
 
 	go func() {
 		for {
@@ -308,10 +238,6 @@ func main() {
 				case axstream.EVENT_RESET:
 					logger.Info("page reset", "root", persistent.Root.Hash)
 
-					err = initPageJS(ctx, page, persistent, &persistLock)
-					if err != nil {
-						return
-					}
 				case axstream.EVENT_PATCH:
 					logger.Info("page updated", "updated", len(e.Updated))
 				}
@@ -319,11 +245,6 @@ func main() {
 				for _, node := range e.Updated {
 					go setAttr(setAttrReqs, node)
 					logger.Info("updated", "role", node.Underlying.Role.Value, "id", node.Underlying.NodeID)
-					visit(node, func(awr *cdp.AXNodeWithRelatives) {
-						if awr.Underlying.Role.Value == "listbox" || awr.Underlying.Role.Value == "option" {
-							fmt.Println(awr)
-						}
-					})
 				}
 			}
 		}

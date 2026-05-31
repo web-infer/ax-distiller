@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"iter"
 
-	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/proto"
+	"github.com/LQR471814/rod"
+	"github.com/LQR471814/rod/lib/proto"
 )
 
 // AXNodeWithRelatives is an AXNode with a FirstChild and NextSibling pointer

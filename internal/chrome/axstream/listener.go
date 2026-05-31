@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/go-rod/rod"
+	"github.com/LQR471814/rod"
 )
 
 // performance tuning

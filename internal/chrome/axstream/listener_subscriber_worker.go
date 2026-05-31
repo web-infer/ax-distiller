@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/go-rod/rod/lib/proto"
+	"github.com/LQR471814/rod/lib/proto"
 )
 
 func (l listener) subscribe(pageID uint32, id proto.AccessibilityAXNodeID) (childTargets []proto.AccessibilityAXNodeID) {

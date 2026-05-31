@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/bytedance/sonic"
-	"github.com/go-rod/rod/lib/proto"
+	"github.com/LQR471814/rod/lib/proto"
 )
 
 var eventLoopNoStale = fmt.Errorf("page should never become stale within the single event loop goroutine")

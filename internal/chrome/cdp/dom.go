@@ -1,6 +1,6 @@
 package cdp
 
-import "github.com/go-rod/rod/lib/proto"
+import "github.com/LQR471814/rod/lib/proto"
 
 type DOMNode struct {
 	NodeID        proto.DOMNodeID        `json:"nodeId"`

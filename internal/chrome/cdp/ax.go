@@ -1,6 +1,6 @@
 package cdp
 
-import "github.com/go-rod/rod/lib/proto"
+import "github.com/LQR471814/rod/lib/proto"
 
 type Value[T any] struct {
 	Value T `json:"value,omitempty"`

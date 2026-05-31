@@ -10,7 +10,7 @@ import (
 	"reflect"
 
 	"github.com/bytedance/sonic"
-	"github.com/go-rod/rod/lib/proto"
+	"github.com/LQR471814/rod/lib/proto"
 	"github.com/lmittmann/tint"
 )
 

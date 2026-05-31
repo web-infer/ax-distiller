@@ -2,14 +2,13 @@ package chrome
 
 import (
 	"ax-distiller/internal/chrome/cdp"
-	"ax-distiller/internal/chrome/fastclient"
 	"context"
 	"os"
 
-	"github.com/go-rod/rod"
-	rodcdp "github.com/go-rod/rod/lib/cdp"
-	"github.com/go-rod/rod/lib/launcher"
-	"github.com/go-rod/rod/lib/proto"
+	"github.com/LQR471814/rod"
+	rodcdp "github.com/LQR471814/rod/lib/cdp"
+	"github.com/LQR471814/rod/lib/launcher"
+	"github.com/LQR471814/rod/lib/proto"
 )
 
 func NewBrowser(chromeBin string) (browser *rod.Browser, err error) {
@@ -31,7 +30,7 @@ func NewBrowser(chromeBin string) (browser *rod.Browser, err error) {
 
 	controlURL := launch.MustLaunch()
 	browser = rod.New()
-	client := fastclient.New()
+	client := rodcdp.New()
 	ws := &rodcdp.WebSocket{}
 	err = ws.Connect(browser.GetContext(), controlURL, nil)
 	if err != nil {

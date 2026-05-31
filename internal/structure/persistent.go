@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"slices"
 
-	"github.com/go-rod/rod/lib/proto"
+	"github.com/LQR471814/rod/lib/proto"
 	"github.com/zeebo/xxh3"
 )
 
