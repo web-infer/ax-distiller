@@ -4,6 +4,7 @@ import (
 	"ax-distiller/internal/chrome"
 	"ax-distiller/internal/chrome/axstream"
 	"ax-distiller/internal/chrome/cdp"
+	"ax-distiller/internal/db"
 	"ax-distiller/internal/slogx"
 	"ax-distiller/internal/stealth"
 	"ax-distiller/internal/structure"
@@ -17,53 +18,8 @@ import (
 	"sync"
 
 	"github.com/LQR471814/rod"
-	rodcdp "github.com/LQR471814/rod/lib/cdp"
-	"github.com/LQR471814/rod/lib/launcher"
 	"github.com/LQR471814/rod/lib/proto"
 )
-
-func NewTestBrowser(chromeBin string) (browser *rod.Browser, err error) {
-	dataTemp := "/tmp/ax-distiller/chrome-data"
-	err = os.RemoveAll(dataTemp)
-	if err != nil {
-		return
-	}
-	err = os.MkdirAll(dataTemp, 0700)
-	if err != nil {
-		return
-	}
-
-	launch := launcher.New().Bin(chromeBin).
-		UserDataDir(dataTemp).
-		Headless(false).
-		Set("display", os.Getenv("DISPLAY")).
-		Set("disable-extensions", "false").
-		Set("disable-blink-features", "AutomationControlled").
-		Set("disable-gpu", "true").
-		Set("no-sandbox", "true").
-		Set("no-default-browser-check", "true").
-		Set("disable-remote-fonts", "true").
-		Set("disable-background-networking", "true").
-		Set("disable-dev-shm-usage", "true").
-		Set("disable-sync", "true").
-		Set("disable-translate", "true").
-		Set("disable-default-apps", "true").
-		Set("mute-audio", "true").
-		Set("hide-scrollbars", "true")
-
-	controlURL := launch.MustLaunch()
-	browser = rod.New()
-	client := rodcdp.New()
-	ws := &rodcdp.WebSocket{}
-	err = ws.Connect(browser.GetContext(), controlURL, nil)
-	if err != nil {
-		panic(err)
-	}
-	client.Start(ws)
-	browser.Client(client)
-	browser.MustConnect()
-	return
-}
 
 func setAttrWorker(ctx context.Context, page *rod.Page, logger *slog.Logger, reqs <-chan *cdp.AXNodeWithRelatives) {
 	for {
@@ -187,7 +143,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	browser, err := NewTestBrowser("chromium")
+	browser, err := chrome.NewBrowser("chromium")
 	if err != nil {
 		panic(err)
 	}
@@ -211,8 +167,23 @@ func main() {
 		go setAttrWorker(ctx, page, logger, setAttrReqs)
 	}
 
+	driver, err := db.OpenDB(ctx, logger, "state.db")
+	if err != nil {
+		panic(err)
+	}
+	defer db.CloseDB(driver)
+
 	persistLock := sync.Mutex{}
-	persistent := structure.NewPersistent(logger)
+	persistent := structure.NewPersistent(logger, driver)
+	persistHandleEvent := func(e axstream.Event) {
+		defer persistLock.Unlock()
+		persistLock.Lock()
+		err = persistent.HandleEvent(ctx, e)
+		if err != nil {
+			err = fmt.Errorf("handle event: %w", err)
+			logger.Error("persist", "err", err)
+		}
+	}
 
 	go func() {
 		for {
@@ -223,9 +194,7 @@ func main() {
 				if !ok {
 					return
 				}
-				persistLock.Lock()
-				persistent.HandleEvent(e)
-				persistLock.Unlock()
+				persistHandleEvent(e)
 
 				switch e.Type {
 				case axstream.EVENT_RESET:
@@ -233,7 +202,7 @@ func main() {
 
 					err = initPageJS(page, logger, persistent, &persistLock)
 					if err != nil {
-						panic(err)
+						logger.Error("init js", "err", err)
 					}
 				case axstream.EVENT_PATCH:
 					logger.Info("page updated", "updated", len(e.Updated))
@@ -246,8 +215,9 @@ func main() {
 		}
 	}()
 
-	page.MustNavigate("http://localhost:8080")
-	// page.MustNavigate("https://www.google.com/travel/flights")
+	// page.MustNavigate("http://localhost:8080")
+	// page.MustNavigate("https://ocw.mit.edu/search/?d=Mathematics")
+	page.MustNavigate("https://www.google.com/travel/flights")
 	// page.MustNavigate("https://amazon.com")
 
 	<-ctx.Done()

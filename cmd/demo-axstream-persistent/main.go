@@ -3,18 +3,15 @@ package main
 import (
 	"ax-distiller/internal/chrome"
 	"ax-distiller/internal/chrome/axstream"
+	"ax-distiller/internal/db"
 	"ax-distiller/internal/slogx"
 	"ax-distiller/internal/structure"
-	"ax-distiller/internal/tree"
 	"context"
 	"fmt"
 	"iter"
 	"log/slog"
 	"os"
 	"os/signal"
-	"slices"
-	"sync"
-	"time"
 
 	"github.com/LQR471814/rod"
 	rodcdp "github.com/LQR471814/rod/lib/cdp"
@@ -95,9 +92,13 @@ func main() {
 		panic(err)
 	}
 
-	timer := time.NewTimer(250 * time.Millisecond)
-	persistLock := sync.Mutex{}
-	persistent := structure.NewPersistent(logger)
+	driver, err := db.OpenDB(ctx, logger, ":memory:")
+	if err != nil {
+		panic(err)
+	}
+	defer db.CloseDB(driver)
+
+	persistent := structure.NewPersistent(logger, driver)
 
 	go func() {
 		for {
@@ -108,49 +109,20 @@ func main() {
 				if !ok {
 					break
 				}
-				persistLock.Lock()
-				persistent.HandleEvent(e)
+
+				err = persistent.HandleEvent(ctx, e)
+				if err != nil {
+					err = fmt.Errorf("handle event: %w", err)
+					logger.Error("persistent error", "err", err)
+				}
 				switch e.Type {
 				case axstream.EVENT_RESET:
 					logger.Info("page reset", "root", persistent.Root.Hash)
-					timer.Reset(250 * time.Millisecond)
+
+					fmt.Println(persistent.Root)
 				case axstream.EVENT_PATCH:
 					logger.Info("page updated")
-					timer.Reset(250 * time.Millisecond)
 				}
-				persistLock.Unlock()
-			}
-		}
-	}()
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-timer.C:
-				persistLock.Lock()
-
-				var keys []uint64
-				for k := range persistent.Index {
-					keys = append(keys, k)
-				}
-				slices.SortFunc(keys, func(a, b uint64) int {
-					return len(persistent.Index[b]) - len(persistent.Index[a])
-				})
-				for _, k := range keys {
-					nodes := persistent.Index[k]
-					fmt.Printf("\nHash -- %v (%v)\n", k, len(nodes))
-					for i := range 3 {
-						if i >= len(nodes) {
-							break
-						}
-						tree.PrintSExpr(nodes[i], os.Stdout)
-						fmt.Println()
-					}
-				}
-
-				persistLock.Unlock()
 			}
 		}
 	}()

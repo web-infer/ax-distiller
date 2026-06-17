@@ -39,17 +39,14 @@ func newLabeler(
 	}
 }
 
-func (l Labeler) lookupStructures(hash uint64) (structures []*structure.Structure, ok bool) {
+func (l Labeler) lookupStructures(hash uint64) (structures []*structure.StructureInstance) {
 	defer l.persistLock.Unlock()
 	l.persistLock.Lock()
-	structures, ok = l.persistent.Index[hash]
-	if !ok {
-		return
-	}
+	structures = l.persistent.InstancesByStructHash(hash)
 	return
 }
 
-func (l Labeler) anyNonCyclicStructure(structures []*structure.Structure) (sct *structure.Structure) {
+func (l Labeler) anyNonCyclicStructure(structures []*structure.StructureInstance) (sct *structure.StructureInstance) {
 	if len(structures) == 0 {
 		panic("structures should have len > 0")
 	}
@@ -69,7 +66,7 @@ func (l Labeler) anyNonCyclicStructure(structures []*structure.Structure) (sct *
 	return
 }
 
-func (l Labeler) childLabels(sct *structure.Structure) (labels []string, err error) {
+func (l Labeler) childLabels(sct *structure.StructureInstance) (labels []string, err error) {
 	type entryResult struct {
 		idx  int
 		text string
@@ -107,7 +104,7 @@ func (l Labeler) childLabels(sct *structure.Structure) (labels []string, err err
 }
 
 func (l Labeler) labelWithLLM(
-	sct *structure.Structure,
+	sct *structure.StructureInstance,
 	childLabels []string,
 ) (label string, err error) {
 	var body strings.Builder
@@ -130,10 +127,7 @@ func (l Labeler) labelWithLLM(
 // aim for a certain min-max range of context for labelling?
 
 func (l Labeler) Label(hash uint64) (label string, err error) {
-	structures, ok := l.lookupStructures(hash)
-	if !ok {
-		return
-	}
+	structures := l.lookupStructures(hash)
 	exists, ok, err := LookupLabel(l.ctx, l.driver, hash)
 	if err != nil {
 		return

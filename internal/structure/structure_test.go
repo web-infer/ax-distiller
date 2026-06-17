@@ -48,7 +48,7 @@ func l(str string) (combinationHash uint64) {
 	return xxh3.Hash([]byte(str))
 }
 
-func printDebug(expected []uint64, output *Structure, out io.Writer) {
+func printDebug(expected []uint64, output *StructureInstance, out io.Writer) {
 	fmt.Fprintln(out, "Expected array:")
 	for i := range expected {
 		fmt.Fprint(out, expected[i], ", ")
@@ -116,7 +116,7 @@ func TestConstructFlat(t *testing.T) {
 		},
 	}
 
-	var head *Structure
+	var head *StructureInstance
 	for _, tc := range table {
 		output := Construct(parseLayer(tc.input))
 		head = output

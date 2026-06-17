@@ -22,6 +22,7 @@
             with pkgs;
             [
               pkg-config
+              sqlc
             ]
           );
 

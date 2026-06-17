@@ -10,8 +10,8 @@ some nodes will have been added, moved around, and deleted.
 
 # Tree-diffing
 
-Therefore it may be useful to quantify exactly *how different* two
-arbitrary structures are based on their subtree.
+Therefore, it may be useful to quantify exactly *how different*
+two arbitrary structures are based on their subtree.
 
 > [!EXAMPLE]
 > Amazon product card 1, product card 2, etc...
@@ -43,9 +43,11 @@ exceeds a certain amount.
 
 ## Segmentation
 
-Even if we can find the "distance" between structures, how does
-that lead into a binary choice of: part of the same "structure
-union / interface" and not part of it?
+If we have the "amount of deletions to get to another structure",
+how do we then determine that this much is too much?
+
+Indeed, it may be the case that the number itself is not useful
+for determining different structures.
 
 # Weisfeiler-Lehman
 
@@ -97,7 +99,7 @@ dimensions" (effectively a hash map with an int key).
 
 We can take an example:
 
-1. Two amazon product cards, one with a discount and one without
+1. Two Amazon product cards, one with a discount and one without
    it.
 2. The only difference is a discount that is (let's say) 2 layers
    down from the root.
@@ -117,4 +119,9 @@ We can take an example:
 > differentiate at most a fixed # of structures on a given page.
 > (that is, if you have a good hash function that will distribute
 > hashes approximately randomly)
+
+## Problems
+
+A multiset makes this order-independent when we do in fact care
+about order.
 

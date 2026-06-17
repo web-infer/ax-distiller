@@ -3,9 +3,13 @@ package structure
 import (
 	"ax-distiller/internal/chrome/axstream"
 	"ax-distiller/internal/chrome/cdp"
+	"ax-distiller/internal/db"
+	"context"
+	"database/sql"
 	"encoding/binary"
 	"log/slog"
 	"slices"
+	"sync"
 
 	"github.com/LQR471814/rod/lib/proto"
 	"github.com/zeebo/xxh3"
@@ -46,35 +50,74 @@ given a node AX ID:
 somewhere in here must compute dropped nodes and drop them
 */
 
+var histogramPool = &sync.Pool{
+	New: func() any {
+		return make(map[uint64]uint32)
+	},
+}
+
 type structureEntry struct {
-	Value      *Structure
+	Value      *StructureInstance
 	References int
 }
 
+type treeState = map[proto.AccessibilityAXNodeID]*StructureInstance
+
 type Persistent struct {
-	Root   *Structure
-	Index  map[uint64][]*Structure
+	Root *StructureInstance
+
 	logger *slog.Logger
+	driver *sql.DB
+	db     *db.Queries
+
+	structIndex map[uint64][]*StructureInstance
+	pathIndex   map[uint64][]*StructureInstance
+
 	// we do not actually use state to cache any operations because at any
-	// point an AX node ID can point to a different possible structure, we
-	// simply keep it for reference of the current mapping of AX node to
-	// structure
-	state      map[proto.AccessibilityAXNodeID]*Structure
-	recomputed map[proto.AccessibilityAXNodeID]*Structure
+	// point an AX node ID can point to a different possible structure
+	//
+	// we use state simply to keep a reference of the latest-known
+	// mapping of AX node to structure
+	state treeState
+
+	// recomputed stores newly fetched nodes after receiving updates from
+	// axstream
+	recomputed treeState
 }
 
-func NewPersistent(logger *slog.Logger) *Persistent {
+func NewPersistent(logger *slog.Logger, driver *sql.DB) *Persistent {
 	return &Persistent{
-		Root:       nil,
-		Index:      make(map[uint64][]*Structure),
-		state:      make(map[proto.AccessibilityAXNodeID]*Structure),
-		recomputed: make(map[proto.AccessibilityAXNodeID]*Structure),
-		logger:     logger.WithGroup("persistent"),
+		Root: nil,
+
+		structIndex: make(map[uint64][]*StructureInstance),
+		pathIndex:   make(map[uint64][]*StructureInstance),
+		state:       make(treeState),
+		recomputed:  make(treeState),
+
+		logger: logger.WithGroup("persistent"),
+		driver: driver,
+		db:     db.New(driver),
 	}
 }
 
-func (p *Persistent) LookupStructure(id proto.AccessibilityAXNodeID) *Structure {
-	return p.state[id]
+func (p *Persistent) StructHashToInstances() map[uint64][]*StructureInstance {
+	return p.structIndex
+}
+
+func (p *Persistent) PathHashToInstances() map[uint64][]*StructureInstance {
+	return p.pathIndex
+}
+
+func (p *Persistent) InstancesByPathHash(pathHash uint64) []*StructureInstance {
+	return p.pathIndex[pathHash]
+}
+
+func (p *Persistent) InstancesByStructHash(hash uint64) []*StructureInstance {
+	return p.structIndex[hash]
+}
+
+func (p *Persistent) InstanceForAXID(ax proto.AccessibilityAXNodeID) *StructureInstance {
+	return p.state[ax]
 }
 
 func isNotIgnored(node *cdp.AXNodeWithRelatives) bool {
@@ -84,11 +127,11 @@ func isNotIgnored(node *cdp.AXNodeWithRelatives) bool {
 	return !ignored
 }
 
-func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state map[proto.AccessibilityAXNodeID]*Structure) (out *Structure) {
-	out = &Structure{Underlying: node}
+func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state treeState) (out *StructureInstance) {
+	out = &StructureInstance{Underlying: node}
 	hashBuff := []byte(node.Underlying.Role.Value)
 
-	var prev *Structure
+	var prev *StructureInstance
 	for child := range cdp.FilterDescendentsShallow(isNotIgnored, node) {
 
 		// single child may return multiple children in linked list (via NextSibling)
@@ -116,7 +159,8 @@ func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state
 	}
 
 	out.Hash = xxh3.Hash(hashBuff)
-	p.Index[out.Hash] = append(p.Index[out.Hash], out)
+	p.structIndex[out.Hash] = append(p.structIndex[out.Hash], out)
+	p.pathIndex[out.PathHash] = append(p.pathIndex[out.PathHash], out)
 
 	// we create synthetic structural wrappers for repeated nodes and patterns
 	// in the children linked list
@@ -143,8 +187,94 @@ func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state
 	return
 }
 
+func (p *Persistent) computeHashPathsInner(
+	st *StructureInstance,
+	parentHash uint64,
+	roleHash uint64,
+	index uint32,
+) {
+	if st == nil {
+		return
+	}
+
+	var buf []byte
+	buf = binary.BigEndian.AppendUint64(buf, parentHash)
+	buf = binary.BigEndian.AppendUint64(buf, roleHash)
+	buf = binary.BigEndian.AppendUint32(buf, index)
+	st.PathHash = xxh3.Hash(buf)
+	st.ParentPathHash = parentHash
+
+	indices := histogramPool.Get().(map[uint64]uint32)
+	for child := st.FirstChild; child != nil; child = child.NextSibling {
+		childRoleHash := xxh3.Hash([]byte(st.Underlying.Underlying.Role.Value))
+		p.computeHashPathsInner(child, st.PathHash, childRoleHash, indices[childRoleHash])
+		indices[childRoleHash]++
+	}
+	clear(indices)
+	histogramPool.Put(indices)
+}
+
+// addHashPaths computes and adds the PathHash attribute on the entire
+// StructureInstance tree
+func (p *Persistent) addHashPaths(st *StructureInstance) {
+	p.computeHashPathsInner(
+		st,
+		0,
+		xxh3.Hash([]byte(st.Underlying.Underlying.Role.Value)),
+		0,
+	)
+}
+
+func (p *Persistent) pushDB(ctx context.Context, state treeState) (err error) {
+	tx, err := p.driver.BeginTx(ctx, nil)
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+
+	txqry := p.db.WithTx(tx)
+	for _, node := range state {
+		var ns []byte
+		var fc []byte
+
+		if node.NextSibling != nil {
+			ns = binary.BigEndian.AppendUint64(nil, node.NextSibling.Hash)
+		}
+		if node.FirstChild != nil {
+			fc = binary.BigEndian.AppendUint64(nil, node.FirstChild.Hash)
+		}
+
+		nodeHash := binary.BigEndian.AppendUint64(nil, node.Hash)
+
+		err = txqry.UpsertStructure(ctx, db.UpsertStructureParams{
+			Hash:        nodeHash,
+			NextSibling: ns,
+			FirstChild:  fc,
+		})
+		if err != nil {
+			return
+		}
+
+		var parent []byte
+		if node.ParentPathHash == 0 {
+			parent = binary.BigEndian.AppendUint64(nil, node.ParentPathHash)
+		}
+
+		err = txqry.UpsertPath(ctx, db.UpsertPathParams{
+			Hash:      binary.BigEndian.AppendUint64(nil, node.PathHash),
+			Structure: nodeHash,
+			Parent:    parent,
+		})
+	}
+
+	err = tx.Commit()
+	return
+}
+
 func (p *Persistent) reconcileRecomputed() {
 	for id, next := range p.recomputed {
+		// we upsert all new recomputed nodes into db
+
 		prev, ok := p.state[id]
 
 		// if update
@@ -159,11 +289,18 @@ func (p *Persistent) reconcileRecomputed() {
 					}
 				}
 
-				instanceList := p.Index[prevChild.Hash]
+				instanceList := p.structIndex[prevChild.Hash]
 				idx := slices.Index(instanceList, prevChild)
 				if idx >= 0 {
-					p.Index[prevChild.Hash] = slices.Delete(instanceList, idx, idx+1)
+					p.structIndex[prevChild.Hash] = slices.Delete(instanceList, idx, idx+1)
 				}
+
+				pathList := p.pathIndex[prevChild.PathHash]
+				idx = slices.Index(pathList, prevChild)
+				if idx >= 0 {
+					p.pathIndex[prevChild.PathHash] = slices.Delete(p.pathIndex[prevChild.PathHash], idx, idx+1)
+				}
+
 				delete(p.state, prevChild.Underlying.Underlying.NodeID)
 			}
 		}
@@ -173,19 +310,26 @@ func (p *Persistent) reconcileRecomputed() {
 	clear(p.recomputed)
 }
 
-func (p *Persistent) HandleEvent(e axstream.Event) {
+func (p *Persistent) HandleEvent(ctx context.Context, e axstream.Event) (err error) {
 	switch e.Type {
 	case axstream.EVENT_RESET:
 		p.logger.Debug("start reset event")
 		clear(p.state)
 		p.Root = p.recomputeNodeStructure(e.Updated[0], p.state)
+		p.addHashPaths(p.Root)
+		err = p.pushDB(ctx, p.state)
 		p.logger.Debug("finish reset event")
 	case axstream.EVENT_PATCH:
+		// TODO: add functionality to update the parents of the updated
+		// nodes? ? verify this behavior
 		p.logger.Debug("start patch event")
 		for _, updated := range e.Updated {
-			p.recomputeNodeStructure(updated, p.recomputed)
+			st := p.recomputeNodeStructure(updated, p.recomputed)
+			p.addHashPaths(st)
 		}
+		err = p.pushDB(ctx, p.recomputed)
 		p.reconcileRecomputed()
 		p.logger.Debug("finish patch event")
 	}
+	return
 }

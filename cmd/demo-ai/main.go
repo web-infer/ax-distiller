@@ -104,8 +104,9 @@ func main() {
 	}
 
 	timer := time.NewTimer(250 * time.Millisecond)
+
 	persistLock := sync.Mutex{}
-	persistent := structure.NewPersistent(logger)
+	persistent := structure.NewPersistent(logger, driver)
 
 	go func() {
 		for {
@@ -116,8 +117,11 @@ func main() {
 				if !ok {
 					break
 				}
+
 				persistLock.Lock()
-				persistent.HandleEvent(e)
+				persistent.HandleEvent(ctx, e)
+				persistLock.Unlock()
+
 				switch e.Type {
 				case axstream.EVENT_RESET:
 					logger.Info("page reset", "root", persistent.Root.Hash)
@@ -126,7 +130,6 @@ func main() {
 					logger.Info("page updated")
 					timer.Reset(250 * time.Millisecond)
 				}
-				persistLock.Unlock()
 			}
 		}
 	}()
@@ -146,9 +149,9 @@ func main() {
 				return
 			case <-timer.C:
 				persistLock.Lock()
-				hashes := make([]uint64, len(persistent.Index))
+				hashes := make([]uint64, len(persistent.StructHashToInstances()))
 				i := 0
-				for h := range persistent.Index {
+				for h := range persistent.StructHashToInstances() {
 					hashes[i] = h
 					i++
 				}

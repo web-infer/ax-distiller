@@ -22,11 +22,16 @@ var synthetic_object = &cdp.AXNodeWithRelatives{
 	},
 }
 
-type Structure struct {
-	Hash        uint64
-	Underlying  *cdp.AXNodeWithRelatives
-	FirstChild  *Structure
-	NextSibling *Structure
+// StructureInstance is a concrete instance of a structure that is
+// expected to be present in the browser state.
+type StructureInstance struct {
+	Hash     uint64
+	PathHash uint64
+	// ParentPathHash will == 0 if there is no parent
+	ParentPathHash uint64
+	Underlying     *cdp.AXNodeWithRelatives
+	FirstChild     *StructureInstance
+	NextSibling    *StructureInstance
 }
 
 // this removes adjacent letters and replaces it with a reference:
@@ -34,7 +39,7 @@ type Structure struct {
 //
 // if not adjacent repeating letters are found, it will just return
 // the original start cleanNode passed in without modification
-func deleteAdjacent(start *Structure) (ret *Structure) {
+func deleteAdjacent(start *StructureInstance) (ret *StructureInstance) {
 	if start == nil {
 		return
 	}
@@ -45,13 +50,13 @@ func deleteAdjacent(start *Structure) (ret *Structure) {
 
 	// points to the current wrapper structure, nil if no wrapper structure is
 	// currently being created.
-	var pending *Structure
+	var pending *StructureInstance
 
 	// always points to the node whose next sibling must be updated to point to
 	// a newly created wrapper structure.
-	var prev *Structure
+	var prev *StructureInstance
 
-	var next *Structure
+	var next *StructureInstance
 	for cur := start; cur != nil; cur = next {
 		next = cur.NextSibling
 
@@ -61,7 +66,7 @@ func deleteAdjacent(start *Structure) (ret *Structure) {
 
 			if pending == nil {
 				// if wrapper does not already exist
-				pending = &Structure{ // create pending structure in case where a structure is guaranteed to exist
+				pending = &StructureInstance{ // create pending structure in case where a structure is guaranteed to exist
 					Hash:       cur.Hash,
 					Underlying: synthetic_list,
 					FirstChild: cur,
@@ -101,13 +106,13 @@ func deleteAdjacent(start *Structure) (ret *Structure) {
 //
 // algorithm will choose most frequent pattern, favoring larger patterns
 // when the frequencies are the same
-func slideWindow(start *Structure) (ret *Structure, replaced bool) {
+func slideWindow(start *StructureInstance) (ret *StructureInstance, replaced bool) {
 	if start == nil {
 		return
 	}
 
 	type pattern struct {
-		start     *Structure // start stores the first node in the pattern
+		start     *StructureInstance // start stores the first node in the pattern
 		length    int
 		instances int
 		comboHash uint64
@@ -188,10 +193,10 @@ outer:
 	// replace instances of pattern with wrappers
 
 	// stores the last letter not a part of the current pattern being scanned
-	var prev *Structure
+	var prev *StructureInstance
 
 	// stores the next sibling reference in case it is overriden
-	var next *Structure
+	var next *StructureInstance
 
 curStart:
 	for curStart := start; curStart != nil; curStart = next {
@@ -199,7 +204,7 @@ curStart:
 
 		// fmt.Println("starting from", curStart.Role.Value())
 
-		var last *Structure
+		var last *StructureInstance
 		cur := curStart
 		ref := maxPattern.start
 		for refidx := 0; refidx < maxPattern.length; refidx++ {
@@ -236,7 +241,7 @@ curStart:
 		next = cur
 
 		last.NextSibling = nil
-		newNode := &Structure{
+		newNode := &StructureInstance{
 			Hash:       maxPattern.comboHash,
 			Underlying: synthetic_object,
 			FirstChild: curStart,
@@ -255,7 +260,7 @@ curStart:
 	return
 }
 
-func convertToStructure(start *cdp.AXNodeWithRelatives) (ret *Structure) {
+func convertToStructure(start *cdp.AXNodeWithRelatives) (ret *StructureInstance) {
 	if start == nil {
 		return nil
 	}
@@ -270,10 +275,10 @@ func convertToStructure(start *cdp.AXNodeWithRelatives) (ret *Structure) {
 		this is because Construct may return multiple nodes, they must be conjoined properly
 	*/
 
-	var prev *Structure
+	var prev *StructureInstance
 	for cur := start; cur != nil; cur = cur.NextSibling {
 		fc := Construct(cur.FirstChild)
-		newNode := &Structure{
+		newNode := &StructureInstance{
 			Underlying: cur,
 			FirstChild: fc,
 		}
@@ -306,7 +311,7 @@ func convertToStructure(start *cdp.AXNodeWithRelatives) (ret *Structure) {
 //   - identify most frequent (and among the most frequent the largest) pattern
 //     and replace all instances of it with a wrapper
 //   - rinse and repeat until no patterns are found
-func Construct(current *cdp.AXNodeWithRelatives) (ret *Structure) {
+func Construct(current *cdp.AXNodeWithRelatives) (ret *StructureInstance) {
 	if current == nil {
 		ret = nil
 		return
@@ -339,15 +344,20 @@ func Construct(current *cdp.AXNodeWithRelatives) (ret *Structure) {
 	return
 }
 
-func (s *Structure) Debug() tree.DebugInfo {
+func (s *StructureInstance) Debug() tree.DebugInfo {
 	meta := s.Underlying.Underlying.Role.Value
 	return tree.DebugInfo{
-		Name:     fmt.Sprintf("%v (%v)", s.Hash, s.Underlying.Underlying.BackendDOMNodeID),
+		Name: fmt.Sprintf(
+			"%v - %v (%v)",
+			s.Hash,
+			s.PathHash,
+			s.Underlying.Underlying.BackendDOMNodeID,
+		),
 		Metadata: meta,
 	}
 }
 
-func (s *Structure) Relatives() (rel tree.Relatives) {
+func (s *StructureInstance) Relatives() (rel tree.Relatives) {
 	if s.FirstChild != nil {
 		rel.FirstChild = s.FirstChild
 	}
@@ -357,6 +367,6 @@ func (s *Structure) Relatives() (rel tree.Relatives) {
 	return
 }
 
-func (s *Structure) String() string {
+func (s *StructureInstance) String() string {
 	return tree.Print(s)
 }
