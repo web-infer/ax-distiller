@@ -100,6 +100,16 @@ func NewPersistent(logger *slog.Logger, driver *sql.DB) *Persistent {
 	}
 }
 
+func upsertInstance(list []*StructureInstance, st *StructureInstance) []*StructureInstance {
+	for i, e := range list {
+		if e.Underlying.Underlying.NodeID == st.Underlying.Underlying.NodeID {
+			list[i] = st
+			return list
+		}
+	}
+	return append(list, st)
+}
+
 func (p *Persistent) StructHashToInstances() map[uint64][]*StructureInstance {
 	return p.structIndex
 }
@@ -159,8 +169,9 @@ func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state
 	}
 
 	out.Hash = xxh3.Hash(hashBuff)
-	p.structIndex[out.Hash] = append(p.structIndex[out.Hash], out)
-	p.pathIndex[out.PathHash] = append(p.pathIndex[out.PathHash], out)
+
+	p.structIndex[out.Hash] = upsertInstance(p.structIndex[out.Hash], out)
+	p.pathIndex[out.PathHash] = upsertInstance(p.pathIndex[out.PathHash], out)
 
 	// we create synthetic structural wrappers for repeated nodes and patterns
 	// in the children linked list
@@ -298,7 +309,7 @@ func (p *Persistent) reconcileRecomputed() {
 				pathList := p.pathIndex[prevChild.PathHash]
 				idx = slices.Index(pathList, prevChild)
 				if idx >= 0 {
-					p.pathIndex[prevChild.PathHash] = slices.Delete(p.pathIndex[prevChild.PathHash], idx, idx+1)
+					p.pathIndex[prevChild.PathHash] = slices.Delete(pathList, idx, idx+1)
 				}
 
 				delete(p.state, prevChild.Underlying.Underlying.NodeID)

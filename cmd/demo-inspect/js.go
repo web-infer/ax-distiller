@@ -153,7 +153,7 @@ const jsController = `
 	window.addEventListener('keydown', (e) => {
 		if (e.key === "c" && e.altKey) {
 			navigator.clipboard.writeText(JSON.stringify(state))
-			setHash("copied: ", state)
+			alert("copied!")
 		}
 	})
 }
