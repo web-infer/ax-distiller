@@ -28,8 +28,6 @@ class TreeNode {
 	#label;
 	/** @type {HTMLDivElement} */
 	#arrowDown;
-	/** @type {boolean} */
-	#expanded = true;
 
 	/** @type {AXID | null} */
 	parent = null;
@@ -75,9 +73,9 @@ class TreeNode {
 			this.#arrowDown.style.display = "none";
 			return;
 		}
-		this.#arrowDown.style.display = "flex";
 
-		if (this.#expanded) {
+		this.#arrowDown.style.display = "flex";
+		if (this.isExpanded()) {
 			this.#arrowDown.style.transform = "";
 		} else {
 			this.#arrowDown.style.transform = "rotate(180deg)";
@@ -88,15 +86,7 @@ class TreeNode {
 	 * @returns {boolean}
 	 */
 	isExpanded() {
-		return this.#expanded;
-	}
-
-	/**
-	 * @param {boolean} expanded
-	 */
-	setExpanded(expanded) {
-		this.#expanded = expanded;
-		this.#updateArrow();
+		return this.#container.children.length === this.children.length;
 	}
 
 	/**
@@ -123,6 +113,7 @@ class TreeNode {
 		}
 		const parent = tree.mustResolve(this.parent);
 		parent.#container.append(this.#root);
+		parent.#updateArrow();
 	}
 
 	/**
@@ -139,6 +130,7 @@ class TreeNode {
 
 	detachChildren() {
 		this.#container.replaceChildren();
+		this.#updateArrow();
 	}
 
 	/**
@@ -158,8 +150,8 @@ class TreeNode {
 }
 
 class Tree {
-	/** @typedef {(id: AXID) => void} OnSelect */
-	/** @typedef {(id: AXID) => void} OnExpand */
+	/** @typedef {(node: TreeNode) => void} OnSelect */
+	/** @typedef {(node: TreeNode) => void} OnExpand */
 
 	/** @type {HTMLDivElement} */
 	root;
@@ -170,7 +162,7 @@ class Tree {
 	#onSelect = null;
 
 	/** @type {OnExpand | null} */
-	#onExpand = null;
+	#onExpandToggle = null;
 
 	/** @param {HTMLDivElement} root */
 	constructor(root) {
@@ -209,13 +201,10 @@ class Tree {
 		this.nodes.set(node.id, node);
 		node.attach(this);
 		node.onExpandToggle(() => {
-			if (node.isExpanded()) {
-				node.setExpanded(false);
-				this.#collapseNode(node);
+			if (!this.#onExpandToggle) {
 				return;
 			}
-			node.setExpanded(true);
-			this.#expandNode(node);
+			this.#onExpandToggle(node);
 		});
 		node.onSelect(() => {
 			this.#selectNode(node);
@@ -230,8 +219,8 @@ class Tree {
 		if (!node) {
 			return;
 		}
-		this.nodes.delete(node.id);
 		node.detach(this);
+		this.nodes.delete(node.id);
 	}
 
 	/**
@@ -244,8 +233,8 @@ class Tree {
 	/**
 	 * @param {OnExpand} callback
 	 */
-	onExpand(callback) {
-		this.#onExpand = callback;
+	onExpandToggle(callback) {
+		this.#onExpandToggle = callback;
 	}
 
 	/**
@@ -255,23 +244,6 @@ class Tree {
 		if (!this.#onSelect) {
 			return;
 		}
-		this.#onSelect(node.id);
-	}
-
-	/**
-	 * @param {TreeNode} node
-	 */
-	#expandNode(node) {
-		if (!this.#onExpand) {
-			return;
-		}
-		this.#onExpand(node.id);
-	}
-
-	/**
-	 * @param {TreeNode} node
-	 */
-	#collapseNode(node) {
-		node.detachChildren();
+		this.#onSelect(node);
 	}
 }

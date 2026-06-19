@@ -68,8 +68,12 @@
       return out
     }
 
-    tree.onExpand((id) => {
-      const children = getChildren(id)
+    tree.onExpandToggle((target) => {
+      if (target.isExpanded()) {
+        target.detachChildren()
+        return
+      }
+      const children = getChildren(target.id)
       for (const node of children) {
         tree.add(node)
       }
