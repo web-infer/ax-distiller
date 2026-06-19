@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>test</title>
+
+  <style>
+    .node-label {
+      display: flex;
+      border: 0;
+      text-align: left;
+      width: 100%;
+      margin: 0;
+    }
+    .arrow-icon-container {
+      display: flex;
+      align-items: center;
+    }
+    .arrow-icon-container:hover {
+      color: #525252;
+    }
+    .arrow-icon {
+      width: 1rem;
+      height: 1rem;
+    }
+  </style>
+
+	<script src="./tree.js"></script>
+</head>
+
+<body>
+  <div style="border: 1px solid red" id="root"></div>
+  <script>
+    const root = document.getElementById("root")
+    const tree = new Tree(root)
+
+    const nodes = [
+      new TreeNode(null, "1", "foo", ["2", "4", "5"]),
+      new TreeNode("1", "2", "bar", ["3", "6"]),
+      new TreeNode("2", "3", "baz", []),
+      new TreeNode("2", "6", "buz", []),
+      new TreeNode("1", "4", "fun", []),
+      new TreeNode("1", "5", "fan", []),
+    ]
+    const map = new Map()
+    for (const n of nodes) {
+      map.set(n.id, n)
+      tree.add(n)
+    }
+
+    function getChildren(parent) {
+      const out = []
+      const queue = []
+      queue.push(parent)
+
+      while (queue.length > 0) {
+        const nodeID = queue.shift()
+        const node = map.get(nodeID)
+        if (!node) {
+          continue
+        }
+        out.push(node)
+        queue.push(...node.children)
+      }
+      out.splice(0, 1)
+
+      return out
+    }
+
+    tree.onExpand((id) => {
+      const children = getChildren(id)
+      for (const node of children) {
+        tree.add(node)
+      }
+    })
+
+  </script>
+</body>
+</html>

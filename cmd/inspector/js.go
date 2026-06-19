@@ -10,10 +10,17 @@ import (
 	"github.com/LQR471814/rod"
 	"github.com/LQR471814/rod/lib/proto"
 	"github.com/ysmood/gson"
+
+	_ "embed"
 )
 
-const jsController = `
+//go:embed tree.js
+var treeComponents string
+
+var jsController = fmt.Sprintf(`
 () => {
+	%s
+
 	class ObjectPool {
 		constructor(newobj) {
 			this.newobj = newobj
@@ -156,10 +163,26 @@ const jsController = `
 			alert("copied!")
 		}
 	})
-}
-`
 
-func initPageJS(page *rod.Page, logger *slog.Logger, persistent *structure.Persistent, persistLock *sync.Mutex) (err error) {
+	Object.defineProperty(window, "", {
+		value: () => {
+			
+		},
+		enumerable: false,
+		writable: false1,
+		configurable: false,
+	})
+}
+`,
+	treeComponents,
+)
+
+func initPageJS(
+	page *rod.Page,
+	logger *slog.Logger,
+	persistent *structure.Persistent,
+	persistLock *sync.Mutex,
+) (err error) {
 	_, err = page.Eval(jsController)
 	if err != nil {
 		err = fmt.Errorf("init js control: %w", err)
