@@ -25,13 +25,12 @@ var synthetic_object = &cdp.AXNodeWithRelatives{
 // StructureInstance is a concrete instance of a structure that is
 // expected to be present in the browser state.
 type StructureInstance struct {
-	Hash     uint64
-	PathHash uint64
-	// ParentPathHash will == 0 if there is no parent
-	ParentPathHash uint64
-	Underlying     *cdp.AXNodeWithRelatives
-	FirstChild     *StructureInstance
-	NextSibling    *StructureInstance
+	Hash        uint64
+	PathHash    uint64
+	Parent      *StructureInstance
+	Underlying  *cdp.AXNodeWithRelatives
+	FirstChild  *StructureInstance
+	NextSibling *StructureInstance
 }
 
 // this removes adjacent letters and replaces it with a reference:

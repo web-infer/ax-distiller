@@ -206,6 +206,10 @@ func main() {
 					}
 				case axstream.EVENT_PATCH:
 					logger.Info("page updated", "updated", len(e.Updated))
+					err = updateInspectorTree(page, persistent, &persistLock, e)
+					if err != nil {
+						logger.Error("update inspector", "err", err)
+					}
 				}
 
 				for _, node := range e.Updated {
@@ -215,9 +219,9 @@ func main() {
 		}
 	}()
 
-	// page.MustNavigate("http://localhost:8080")
+	page.MustNavigate("http://localhost:8080")
 	// page.MustNavigate("https://ocw.mit.edu/search/?d=Mathematics")
-	page.MustNavigate("https://www.google.com/travel/flights")
+	// page.MustNavigate("https://www.google.com/travel/flights")
 	// page.MustNavigate("https://amazon.com")
 
 	<-ctx.Done()

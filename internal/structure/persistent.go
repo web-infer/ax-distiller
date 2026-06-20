@@ -173,22 +173,24 @@ func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state
 	p.structIndex[out.Hash] = upsertInstance(p.structIndex[out.Hash], out)
 	p.pathIndex[out.PathHash] = upsertInstance(p.pathIndex[out.PathHash], out)
 
-	// we create synthetic structural wrappers for repeated nodes and patterns
-	// in the children linked list
-	for {
-		// group repeated adjacent nodes into a wrapper
-		out.FirstChild = deleteAdjacent(out.FirstChild)
+	/*
+		// we create synthetic structural wrappers for repeated nodes and patterns
+		// in the children linked list
+		for {
+			// group repeated adjacent nodes into a wrapper
+			out.FirstChild = deleteAdjacent(out.FirstChild)
 
-		// identify most frequent (and among the most frequent the largest)
-		// pattern and replace all instances of it with a wrapper
-		var replaced bool
-		out.FirstChild, replaced = slideWindow(out.FirstChild)
+			// identify most frequent (and among the most frequent the largest)
+			// pattern and replace all instances of it with a wrapper
+			var replaced bool
+			out.FirstChild, replaced = slideWindow(out.FirstChild)
 
-		// rinse and repeat until no patterns are found
-		if !replaced {
-			break
+			// rinse and repeat until no patterns are found
+			if !replaced {
+				break
+			}
 		}
-	}
+	*/
 
 	if out.NextSibling != nil {
 		panic("assert failed: out.NextSibling != nil")
@@ -196,6 +198,16 @@ func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state
 
 	state[node.Underlying.NodeID] = out
 	return
+}
+
+func (p *Persistent) setParent(st *StructureInstance) {
+	if st == nil {
+		return
+	}
+	for child := st.FirstChild; child != nil; child = child.NextSibling {
+		child.Parent = st
+		p.setParent(child)
+	}
 }
 
 func (p *Persistent) computeHashPathsInner(
@@ -213,7 +225,6 @@ func (p *Persistent) computeHashPathsInner(
 	buf = binary.BigEndian.AppendUint64(buf, roleHash)
 	buf = binary.BigEndian.AppendUint32(buf, index)
 	st.PathHash = xxh3.Hash(buf)
-	st.ParentPathHash = parentHash
 
 	indices := histogramPool.Get().(map[uint64]uint32)
 	for child := st.FirstChild; child != nil; child = child.NextSibling {
@@ -267,8 +278,8 @@ func (p *Persistent) pushDB(ctx context.Context, state treeState) (err error) {
 		}
 
 		var parent []byte
-		if node.ParentPathHash == 0 {
-			parent = binary.BigEndian.AppendUint64(nil, node.ParentPathHash)
+		if node.Parent != nil {
+			parent = binary.BigEndian.AppendUint64(nil, node.Parent.PathHash)
 		}
 
 		err = txqry.UpsertPath(ctx, db.UpsertPathParams{
@@ -327,6 +338,7 @@ func (p *Persistent) HandleEvent(ctx context.Context, e axstream.Event) (err err
 		p.logger.Debug("start reset event")
 		clear(p.state)
 		p.Root = p.recomputeNodeStructure(e.Updated[0], p.state)
+		p.setParent(p.Root)
 		p.addHashPaths(p.Root)
 		err = p.pushDB(ctx, p.state)
 		p.logger.Debug("finish reset event")
@@ -336,6 +348,7 @@ func (p *Persistent) HandleEvent(ctx context.Context, e axstream.Event) (err err
 		p.logger.Debug("start patch event")
 		for _, updated := range e.Updated {
 			st := p.recomputeNodeStructure(updated, p.recomputed)
+			p.setParent(st)
 			p.addHashPaths(st)
 		}
 		err = p.pushDB(ctx, p.recomputed)

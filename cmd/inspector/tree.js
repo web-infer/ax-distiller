@@ -1,12 +1,35 @@
 /** @typedef {string} AXID */
 
-const arrowDown = document.createElement("template");
-arrowDown.innerHTML = `
-<svg class="arrow-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-arrow-down-icon lucide-arrow-down">
-	<path d="M12 5v14"/>
-	<path d="m19 12-7 7-7-7"/>
-</svg>
-`;
+function newArrowDown() {
+	const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+
+	svg.classList.add("__ax_inspector_arrow-icon");
+
+	svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+	svg.setAttribute("width", "24");
+	svg.setAttribute("height", "24");
+	svg.setAttribute("viewBox", "0 0 24 24");
+	svg.setAttribute("fill", "none");
+	svg.setAttribute("stroke", "currentColor");
+	svg.setAttribute("stroke-width", "2");
+	svg.setAttribute("stroke-linecap", "round");
+	svg.setAttribute("stroke-linejoin", "round");
+
+	const path1 = document.createElementNS(
+		"http://www.w3.org/2000/svg",
+		"path",
+	);
+	path1.setAttribute("d", "M12 5v14");
+
+	const path2 = document.createElementNS(
+		"http://www.w3.org/2000/svg",
+		"path",
+	);
+	path2.setAttribute("d", "m19 12-7 7-7-7");
+
+	svg.append(path1, path2);
+	return svg;
+}
 
 class NodeNotFoundError extends Error {
 	/**
@@ -51,11 +74,11 @@ class TreeNode {
 		this.#container.style.paddingLeft = "1rem";
 
 		this.#label = document.createElement("button");
-		this.#label.className = "node-label";
+		this.#label.className = "__ax_inspector_node-label";
 
 		this.#arrowDown = document.createElement("div");
-		this.#arrowDown.className = "arrow-icon-container";
-		this.#arrowDown.append(arrowDown.content.cloneNode(true));
+		this.#arrowDown.className = "__ax_inspector_arrow-icon-container";
+		this.#arrowDown.append(newArrowDown());
 
 		const text = document.createElement("span");
 		text.innerText = name;
@@ -66,6 +89,18 @@ class TreeNode {
 		this.#root.append(this.#container);
 
 		this.updateState(parent, id, name, children);
+	}
+
+	/**
+	 * @param {InfoStruct} info
+	 */
+	static fromInfo(info) {
+		return new TreeNode(
+			info.Parent,
+			info.ID,
+			`${info.Role} (${info.StructureHash})`,
+			info.Children,
+		);
 	}
 
 	#updateArrow() {
@@ -86,7 +121,7 @@ class TreeNode {
 	 * @returns {boolean}
 	 */
 	isExpanded() {
-		return this.#container.children.length === this.children.length;
+		return this.#container.children.length >= this.children.length;
 	}
 
 	/**
@@ -99,7 +134,7 @@ class TreeNode {
 		this.parent = parent;
 		this.id = id;
 		this.name = name;
-		this.children = children;
+		this.children = children ?? [];
 		this.#updateArrow();
 	}
 
@@ -137,15 +172,14 @@ class TreeNode {
 	 * @param {() => void} callback
 	 */
 	onSelect(callback) {
-		this.#label.onclick = callback;
+		this.#label.onmouseenter = callback;
 	}
 
 	/**
 	 * @param {() => void} callback
 	 */
 	onExpandToggle(callback) {
-		this.#arrowDown.onclick = callback;
-		this.#label.ondblclick = callback;
+		this.#label.onclick = callback;
 	}
 }
 
@@ -209,6 +243,17 @@ class Tree {
 		node.onSelect(() => {
 			this.#selectNode(node);
 		});
+	}
+
+	/**
+	 * @param {TreeNode} node
+	 */
+	update(node) {
+		const existing = this.nodes.get(node.id);
+		if (!existing) {
+			return;
+		}
+		existing.updateState(node.parent, node.id, node.name, node.children);
 	}
 
 	/**

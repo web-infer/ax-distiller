@@ -49,7 +49,7 @@
       tree.add(n)
     }
 
-    function getChildren(parent) {
+    function getChildrenBFS(parent) {
       const out = []
       const queue = []
       queue.push(parent)
@@ -68,12 +68,28 @@
       return out
     }
 
+    function getChildrenDFSInner(parent, out) {
+      const node = map.get(parent)
+      out.push(node)
+      for (const child of node.children) {
+        getChildrenDFSInner(child, out)
+      }
+    }
+
+    function getChildrenDFS(parent) {
+      const out = []
+      getChildrenDFSInner(parent, out)
+      out.splice(0, 1)
+      return out
+    }
+
     tree.onExpandToggle((target) => {
       if (target.isExpanded()) {
         target.detachChildren()
         return
       }
-      const children = getChildren(target.id)
+      // const children = getChildrenBFS(target.id)
+      const children = getChildrenDFS(target.id)
       for (const node of children) {
         tree.add(node)
       }
