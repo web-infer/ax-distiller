@@ -38,7 +38,7 @@ func (l listener) subscribe(pageID uint32, id proto.AccessibilityAXNodeID) (chil
 func (l listener) subDispatcher(
 	ctx context.Context,
 	wg *sync.WaitGroup,
-	count *uint64,
+	count *atomic.Uint64,
 	queue chan proto.AccessibilityAXNodeID,
 	pageID uint32,
 ) {
@@ -51,7 +51,7 @@ func (l listener) subDispatcher(
 				return
 			}
 			childTargets := l.subscribe(pageID, id)
-			atomic.AddUint64(count, 1)
+			count.Add(1)
 			wg.Add(len(childTargets) - 1)
 			go func(targets []proto.AccessibilityAXNodeID) {
 				// this must be done in a goroutine because otherwise we
@@ -90,7 +90,7 @@ func (l listener) subDispatcher(
 }
 
 func (l listener) subSubtree(root cdp.AXNode) {
-	count := uint64(0)
+	count := atomic.Uint64{}
 	wg := sync.WaitGroup{}
 
 	pageID := l.treeState.PageID()
@@ -107,5 +107,5 @@ func (l listener) subSubtree(root cdp.AXNode) {
 	queue <- root.NodeID
 	wg.Wait()
 
-	l.logger.Info("subscribed nodes", "count", count, "root", root.NodeID)
+	l.logger.Info("subscribed nodes", "count", count.Load(), "root", root.NodeID)
 }
