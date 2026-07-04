@@ -27,7 +27,7 @@ type StructureInstance struct {
 func (st *StructureInstance) UpdateParentRecursively(parent *StructureInstance) {
 	st.Parent = parent
 	for child := st.FirstChild; child != nil; child = child.NextSibling {
-		st.UpdateParentRecursively(st)
+		child.UpdateParentRecursively(st)
 	}
 }
 

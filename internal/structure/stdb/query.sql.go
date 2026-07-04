@@ -82,6 +82,25 @@ func (q *Queries) DeleteInstance(ctx context.Context, id int64) error {
 	return err
 }
 
+const getRoot = `-- name: GetRoot :one
+select id, ax_id, role, shash, phash, parent from structure_instance
+where parent is null
+`
+
+func (q *Queries) GetRoot(ctx context.Context) (StructureInstance, error) {
+	row := q.db.QueryRowContext(ctx, getRoot)
+	var i StructureInstance
+	err := row.Scan(
+		&i.ID,
+		&i.AxID,
+		&i.Role,
+		&i.Shash,
+		&i.Phash,
+		&i.Parent,
+	)
+	return i, err
+}
+
 const getStruct = `-- name: GetStruct :one
 select id, ax_id, role, shash, phash, parent from structure_instance
 where id = ?

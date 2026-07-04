@@ -82,3 +82,6 @@ where id = ?;
 select * from structure_instance
 where parent = ?;
 
+-- name: GetRoot :one
+select * from structure_instance
+where parent is null;

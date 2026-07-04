@@ -3,8 +3,8 @@ create table structure_instance (
 	id integer primary key autoincrement,
 	ax_id text unique,
 	role text,
-	shash blob not null check (length(hash) = 8),
-	phash blob not null check (length(path_hash) = 8),
+	shash blob not null check (length(shash) = 8),
+	phash blob not null check (length(phash) = 8),
 	parent integer references structure_instance (id)
 		on update cascade
 		on delete cascade
