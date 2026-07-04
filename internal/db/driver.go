@@ -27,6 +27,8 @@ var sqlite_options = url.Values{
 		"mmap_size(30000000000)",
 		"journal_size_limit(6144000)",
 		"busy_timeout(10000)",
+		// check fkeys
+		"foreign_keys(on)",
 	},
 }
 
