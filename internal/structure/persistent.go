@@ -9,10 +9,8 @@ import (
 	"encoding/binary"
 	"log/slog"
 	"slices"
-	"sync"
 
 	"github.com/LQR471814/rod/lib/proto"
-	"github.com/zeebo/xxh3"
 )
 
 /*
@@ -49,17 +47,6 @@ given a node AX ID:
 
 somewhere in here must compute dropped nodes and drop them
 */
-
-var histogramPool = &sync.Pool{
-	New: func() any {
-		return make(map[uint64]uint32)
-	},
-}
-
-type structureEntry struct {
-	Value      *StructureInstance
-	References int
-}
 
 type treeState = map[proto.AccessibilityAXNodeID]*StructureInstance
 
@@ -100,7 +87,8 @@ func NewPersistent(logger *slog.Logger, driver *sql.DB) *Persistent {
 	}
 }
 
-func upsertInstance(list []*StructureInstance, st *StructureInstance) []*StructureInstance {
+// replaceInstance replaces or adds a structure instance to a list of them
+func replaceInstance(list []*StructureInstance, st *StructureInstance) []*StructureInstance {
 	for i, e := range list {
 		if e.Underlying.Underlying.NodeID == st.Underlying.Underlying.NodeID {
 			list[i] = st
@@ -137,114 +125,40 @@ func isNotIgnored(node *cdp.AXNodeWithRelatives) bool {
 	return !ignored
 }
 
-func (p *Persistent) recomputeNodeStructure(node *cdp.AXNodeWithRelatives, state treeState) (out *StructureInstance) {
-	out = &StructureInstance{Underlying: node}
-	hashBuff := []byte(node.Underlying.Role.Value)
-
-	var prev *StructureInstance
-	for child := range cdp.FilterDescendentsShallow(isNotIgnored, node) {
-
-		// single child may return multiple children in linked list (via NextSibling)
-		firstStruct := p.recomputeNodeStructure(child, state)
-
-		// may return NextSibling != nil, but only if hitting cache
-		// should never hit cache in root
-
-		if prev == nil {
-			// set first child to the first childStruct
-			out.FirstChild = firstStruct
-		} else {
-			// set final node of last child's NextSibling to first node of this child
-			prev.NextSibling = firstStruct
-		}
-
-		for str := firstStruct; str != nil; str = str.NextSibling {
-			// add all children hashes to structure
-			hashBuff = binary.LittleEndian.AppendUint64(hashBuff, str.Hash)
-			if str.NextSibling == nil {
-				// prev points to the last node of the child list returned
-				prev = str
-			}
-		}
+func (p *Persistent) deleteInstance(state treeState, inst *StructureInstance) {
+	instanceList := p.structIndex[inst.Hash]
+	idx := slices.Index(instanceList, inst)
+	if idx >= 0 {
+		p.structIndex[inst.Hash] = slices.Delete(instanceList, idx, idx+1)
 	}
 
-	out.Hash = xxh3.Hash(hashBuff)
-
-	p.structIndex[out.Hash] = upsertInstance(p.structIndex[out.Hash], out)
-	p.pathIndex[out.PathHash] = upsertInstance(p.pathIndex[out.PathHash], out)
-
-	/*
-		// we create synthetic structural wrappers for repeated nodes and patterns
-		// in the children linked list
-		for {
-			// group repeated adjacent nodes into a wrapper
-			out.FirstChild = deleteAdjacent(out.FirstChild)
-
-			// identify most frequent (and among the most frequent the largest)
-			// pattern and replace all instances of it with a wrapper
-			var replaced bool
-			out.FirstChild, replaced = slideWindow(out.FirstChild)
-
-			// rinse and repeat until no patterns are found
-			if !replaced {
-				break
-			}
-		}
-	*/
-
-	if out.NextSibling != nil {
-		panic("assert failed: out.NextSibling != nil")
+	pathList := p.pathIndex[inst.PathHash]
+	idx = slices.Index(pathList, inst)
+	if idx >= 0 {
+		p.pathIndex[inst.PathHash] = slices.Delete(pathList, idx, idx+1)
 	}
 
-	state[node.Underlying.NodeID] = out
-	return
+	delete(state, inst.Underlying.Underlying.NodeID)
 }
 
-func (p *Persistent) setParent(st *StructureInstance) {
-	if st == nil {
-		return
-	}
+func (p *Persistent) saveStructures(st *StructureInstance, state treeState) {
+	state[st.Underlying.Underlying.NodeID] = st
+	p.structIndex[st.Hash] = replaceInstance(p.structIndex[st.Hash], st)
+	p.pathIndex[st.PathHash] = replaceInstance(p.pathIndex[st.PathHash], st)
+
 	for child := st.FirstChild; child != nil; child = child.NextSibling {
-		child.Parent = st
-		p.setParent(child)
+		p.saveStructures(child, state)
 	}
 }
 
-func (p *Persistent) computeHashPathsInner(
-	st *StructureInstance,
-	parentHash uint64,
-	roleHash uint64,
-	index uint32,
-) {
-	if st == nil {
-		return
+func (p *Persistent) saveSynthStructures(st *StructureInstance, state treeState) {
+	switch st.Underlying.Underlying.Role.Value {
+	case ROLE_SYNTHETIC_OBJECT, ROLE_SYNTHETIC_LIST:
+		state[st.Underlying.Underlying.NodeID] = &StructureInstance{
+			Hash:     st.Hash,
+			PathHash: st.PathHash,
+		}
 	}
-
-	var buf []byte
-	buf = binary.BigEndian.AppendUint64(buf, parentHash)
-	buf = binary.BigEndian.AppendUint64(buf, roleHash)
-	buf = binary.BigEndian.AppendUint32(buf, index)
-	st.PathHash = xxh3.Hash(buf)
-
-	indices := histogramPool.Get().(map[uint64]uint32)
-	for child := st.FirstChild; child != nil; child = child.NextSibling {
-		childRoleHash := xxh3.Hash([]byte(st.Underlying.Underlying.Role.Value))
-		p.computeHashPathsInner(child, st.PathHash, childRoleHash, indices[childRoleHash])
-		indices[childRoleHash]++
-	}
-	clear(indices)
-	histogramPool.Put(indices)
-}
-
-// addHashPaths computes and adds the PathHash attribute on the entire
-// StructureInstance tree
-func (p *Persistent) addHashPaths(st *StructureInstance) {
-	p.computeHashPathsInner(
-		st,
-		0,
-		xxh3.Hash([]byte(st.Underlying.Underlying.Role.Value)),
-		0,
-	)
 }
 
 func (p *Persistent) pushDB(ctx context.Context, state treeState) (err error) {
@@ -258,15 +172,17 @@ func (p *Persistent) pushDB(ctx context.Context, state treeState) (err error) {
 	for _, node := range state {
 		var ns []byte
 		var fc []byte
+		nodeHash := getByteslice()
 
 		if node.NextSibling != nil {
-			ns = binary.BigEndian.AppendUint64(nil, node.NextSibling.Hash)
+			ns = getByteslice()
+			ns = binary.BigEndian.AppendUint64(ns, node.NextSibling.Hash)
 		}
 		if node.FirstChild != nil {
-			fc = binary.BigEndian.AppendUint64(nil, node.FirstChild.Hash)
+			fc = getByteslice()
+			fc = binary.BigEndian.AppendUint64(fc, node.FirstChild.Hash)
 		}
-
-		nodeHash := binary.BigEndian.AppendUint64(nil, node.Hash)
+		nodeHash = binary.BigEndian.AppendUint64(nodeHash, node.Hash)
 
 		err = txqry.UpsertStructure(ctx, db.UpsertStructureParams{
 			Hash:        nodeHash,
@@ -277,16 +193,30 @@ func (p *Persistent) pushDB(ctx context.Context, state treeState) (err error) {
 			return
 		}
 
-		var parent []byte
-		if node.Parent != nil {
-			parent = binary.BigEndian.AppendUint64(nil, node.Parent.PathHash)
+		if ns != nil {
+			putByteslice(ns)
 		}
+		if fc != nil {
+			putByteslice(fc)
+		}
+		putByteslice(nodeHash)
+
+		parent := getByteslice()
+		pathHash := getByteslice()
+
+		if node.Parent != nil {
+			parent = binary.BigEndian.AppendUint64(parent, node.Parent.PathHash)
+		}
+		pathHash = binary.BigEndian.AppendUint64(pathHash, node.PathHash)
 
 		err = txqry.UpsertPath(ctx, db.UpsertPathParams{
-			Hash:      binary.BigEndian.AppendUint64(nil, node.PathHash),
+			Hash:      pathHash,
 			Structure: nodeHash,
 			Parent:    parent,
 		})
+
+		putByteslice(parent)
+		putByteslice(pathHash)
 	}
 
 	err = tx.Commit()
@@ -310,20 +240,7 @@ func (p *Persistent) reconcileRecomputed() {
 						continue cleanup
 					}
 				}
-
-				instanceList := p.structIndex[prevChild.Hash]
-				idx := slices.Index(instanceList, prevChild)
-				if idx >= 0 {
-					p.structIndex[prevChild.Hash] = slices.Delete(instanceList, idx, idx+1)
-				}
-
-				pathList := p.pathIndex[prevChild.PathHash]
-				idx = slices.Index(pathList, prevChild)
-				if idx >= 0 {
-					p.pathIndex[prevChild.PathHash] = slices.Delete(pathList, idx, idx+1)
-				}
-
-				delete(p.state, prevChild.Underlying.Underlying.NodeID)
+				p.deleteInstance(p.state, prevChild)
 			}
 		}
 
@@ -336,23 +253,35 @@ func (p *Persistent) HandleEvent(ctx context.Context, e axstream.Event) (err err
 	switch e.Type {
 	case axstream.EVENT_RESET:
 		p.logger.Debug("start reset event")
+
 		clear(p.state)
-		p.Root = p.recomputeNodeStructure(e.Updated[0], p.state)
-		p.setParent(p.Root)
-		p.addHashPaths(p.Root)
+
+		p.Root = p.makeNodeTree(e.Updated[0])
+		p.makePathHashes(p.Root)
+		p.makeParent(p.Root)
+		p.makeSynthetics(p.Root)
+		p.saveStructures(p.Root, p.state)
+
 		err = p.pushDB(ctx, p.state)
+
 		p.logger.Debug("finish reset event")
 	case axstream.EVENT_PATCH:
 		// TODO: add functionality to update the parents of the updated
 		// nodes? ? verify this behavior
 		p.logger.Debug("start patch event")
+
 		for _, updated := range e.Updated {
-			st := p.recomputeNodeStructure(updated, p.recomputed)
-			p.setParent(st)
-			p.addHashPaths(st)
+			st := p.makeNodeTree(updated)
+			p.makePathHashes(st)
+			p.makeParent(st)
+			p.makeSynthetics(st)
+			p.saveStructures(p.Root, p.recomputed)
 		}
+
 		err = p.pushDB(ctx, p.recomputed)
+
 		p.reconcileRecomputed()
+
 		p.logger.Debug("finish patch event")
 	}
 	return

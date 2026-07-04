@@ -7,3 +7,10 @@ sql:
       go:
         package: "db"
         out: "internal/db"
+  - engine: "sqlite"
+    queries: "internal/structure/stdb/query.sql"
+    schema: "internal/structure/stdb/schema.sql"
+    gen:
+      go:
+        package: "stdb"
+        out: "internal/structure/stdb"

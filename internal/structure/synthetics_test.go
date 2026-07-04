@@ -38,7 +38,7 @@ func parseLayer(str string) (ret *cdp.AXNodeWithRelatives) {
 func h(hashes ...uint64) (combinationHash uint64) {
 	var buff []byte
 	for _, h := range hashes {
-		buff = binary.LittleEndian.AppendUint64(buff, h)
+		buff = binary.BigEndian.AppendUint64(buff, h)
 	}
 	combinationHash = xxh3.Hash(buff)
 	return
