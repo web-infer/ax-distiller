@@ -1,0 +1,35 @@
+{
+  "name": "panel",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier -w .",
+    "test": "vitest run",
+    "lint": "oxlint"
+  },
+  "dependencies": {
+    "@effect/platform-browser": "4.0.0-beta.88",
+    "@foldkit/devtools": "^0.123.0",
+    "@foldkit/ui": "^0.123.0",
+    "@tailwindcss/vite": "^4.3.1",
+    "effect": "4.0.0-beta.88",
+    "foldkit": "^0.123.0",
+    "tailwindcss": "^4.3.1"
+  },
+  "devDependencies": {
+    "@foldkit/devtools-mcp": "^0.13.1",
+    "@foldkit/oxlint-plugin": "^0.2.0",
+    "@foldkit/vite-plugin": "^0.10.0",
+    "@trivago/prettier-plugin-sort-imports": "^6.0.2",
+    "happy-dom": "^20.10.4",
+    "oxlint": "^1.72.0",
+    "prettier": "^3.8.4",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.9"
+  }
+}
