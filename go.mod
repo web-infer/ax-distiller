@@ -3,6 +3,7 @@ module ax-distiller
 go 1.26.3
 
 require (
+	connectrpc.com/connect v1.20.0
 	github.com/LQR471814/rod v0.0.0-20260531215918-c2bb4b9c1316
 	github.com/bytedance/sonic v1.15.1
 	github.com/elliotchance/orderedmap/v3 v3.1.0
@@ -13,6 +14,7 @@ require (
 	github.com/xlab/treeprint v1.2.0
 	github.com/ysmood/gson v0.7.3
 	github.com/zeebo/xxh3 v1.1.0
+	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.50.0
 )
 

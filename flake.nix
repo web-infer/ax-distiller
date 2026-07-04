@@ -7,8 +7,31 @@
       pkgs = import nixpkgs {
         inherit system;
       };
+      codegenDeps = with pkgs; [
+        buf
+        sqlc
+        protoc-gen-go
+        protoc-gen-connect-go
+        protoc-gen-es
+      ];
     in
     {
+      apps.${system}.codegen =
+        let
+          codegen = pkgs.writeShellApplication {
+            name = "codegen";
+            runtimeInputs = codegenDeps;
+            text = ''
+              ${pkgs.sqlc}/bin/sqlc generate
+              ${pkgs.buf}/bin/buf generate
+            '';
+          };
+        in
+        {
+          type = "app";
+          program = "${codegen}/bin/codegen";
+        };
+
       devShells.${system}.default =
         let
           libs = with pkgs; [
@@ -22,8 +45,8 @@
             with pkgs;
             [
               pkg-config
-              sqlc
             ]
+            ++ codegenDeps
           );
 
           NIX_LD = builtins.readFile "${pkgs.stdenv.cc}/nix-support/dynamic-linker";
