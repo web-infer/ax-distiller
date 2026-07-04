@@ -6,7 +6,9 @@ import (
 	"ax-distiller/internal/db"
 	"ax-distiller/internal/slogx"
 	"ax-distiller/internal/structure"
+	"ax-distiller/internal/structure/stdb"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -92,13 +94,21 @@ func main() {
 		panic(err)
 	}
 
-	driver, err := db.OpenDB(ctx, logger, ":memory:")
+	dbDriver, err := db.OpenDB(ctx, logger, ":memory:")
 	if err != nil {
 		panic(err)
 	}
-	defer db.CloseDB(driver)
+	defer db.CloseDB(dbDriver)
 
-	persistent := structure.NewPersistent(logger, driver)
+	stdbDriver, err := stdb.OpenDB(ctx, logger)
+	if err != nil {
+		panic(err)
+	}
+	defer stdbDriver.Close()
+
+	stqry := stdb.New(stdbDriver)
+
+	persistent := structure.NewPersistent(logger, dbDriver, stdbDriver)
 
 	go func() {
 		for {
@@ -117,9 +127,12 @@ func main() {
 				}
 				switch e.Type {
 				case axstream.EVENT_RESET:
-					logger.Info("page reset", "root", persistent.Root.Hash)
-
-					fmt.Println(persistent.Root)
+					root, err := stqry.GetRoot(ctx)
+					if err != nil {
+						logger.Error("get root", "err", err)
+						continue
+					}
+					logger.Info("page reset", "root", binary.BigEndian.Uint64(root.Shash))
 				case axstream.EVENT_PATCH:
 					logger.Info("page updated")
 				}
