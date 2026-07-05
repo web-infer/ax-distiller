@@ -8,6 +8,7 @@ import (
 	"ax-distiller/internal/slogx"
 	"ax-distiller/internal/stealth"
 	"ax-distiller/internal/structure"
+	"ax-distiller/internal/structure/stdb"
 	"context"
 	"fmt"
 	"iter"
@@ -167,17 +168,24 @@ func main() {
 		go setAttrWorker(ctx, page, logger, setAttrReqs)
 	}
 
-	driver, err := db.OpenDB(ctx, logger, "state.db")
+	dbDriver, err := db.OpenDB(ctx, logger, "state.db")
 	if err != nil {
 		panic(err)
 	}
-	defer db.CloseDB(driver)
+	defer db.CloseDB(dbDriver)
+
+	stdbDriver, err := stdb.OpenDB(ctx, logger)
+	if err != nil {
+		panic(err)
+	}
+	defer stdbDriver.Close()
 
 	persistLock := sync.Mutex{}
-	persistent := structure.NewPersistent(logger, driver)
+	persistent := structure.NewPersistent(logger, dbDriver, stdbDriver)
 	persistHandleEvent := func(e axstream.Event) {
 		defer persistLock.Unlock()
 		persistLock.Lock()
+
 		err = persistent.HandleEvent(ctx, e)
 		if err != nil {
 			err = fmt.Errorf("handle event: %w", err)
@@ -198,7 +206,7 @@ func main() {
 
 				switch e.Type {
 				case axstream.EVENT_RESET:
-					logger.Info("page reset", "root", persistent.Root.Hash)
+					logger.Info("page reset")
 
 					err = initPageJS(page, logger, persistent, &persistLock)
 					if err != nil {
