@@ -35,7 +35,7 @@ class ObjectPool {
 }
 
 /**
- * @typedef {{Parent: string | null, ID: string, Role: string, StructureHash: string, PathHash: string, Instances: string[], Children: string[]}} InfoStruct
+ * @typedef {{Parent: string | null, ID: string, Role: string, StructureHash: string, PathHash: string, Instances: number, Highlights: string[], Children: string[]}} InfoStruct
  */
 
 class Highlighter {
@@ -148,7 +148,7 @@ class Display {
 		this.#setField("role", info.Role);
 		this.#setField("struct_hash", info.StructureHash);
 		this.#setField("path_hash", info.PathHash);
-		this.#setField("instance_count", String(info.Instances.length));
+		this.#setField("instance_count", String(info.Instances));
 	}
 
 	/**
@@ -177,7 +177,6 @@ class SyncedTree {
 				node.detachChildren();
 				return;
 			}
-			console.log(node);
 			expandLevels(node.id, 2)
 				.then((infos) => {
 					infos.splice(0, 1);
@@ -289,7 +288,7 @@ class Inspector {
 
 		this.container.style.height = "600px";
 		this.container.style.width = "400px";
-		this.container.style.bottom = "0px";
+		this.container.style.top = "0px";
 		this.container.style.right = "0px";
 
 		const tree = document.createElement("div");
@@ -299,8 +298,19 @@ class Inspector {
 		this.#tree = new SyncedTree(tree);
 
 		this.#tree.onSelect((node) => {
+			console.log("lookup tree", node.id);
 			getStructInfo(node.id)
 				.then((info) => {
+					if (info.ID === "L") {
+						return;
+					}
+					// indicates that this node is a synthetic wrapper
+					if (info.ID.startsWith("O")) {
+						console.log("INFO", info);
+						this.#display.setInfo(info);
+						this.show(null, info);
+						return;
+					}
 					const el = this.#getNodeByAXID(info.ID);
 					if (!el) {
 						this.#display.setInfo(info);
@@ -342,20 +352,22 @@ class Inspector {
 	}
 
 	/**
-	 * @param {Element} el
+	 * @param {Element | null} el
 	 * @param {InfoStruct} info
 	 */
 	show(el, info) {
 		this.#display.setInfo(info);
 
-		if (info.Instances.length > 50) {
+		if (info.Highlights.length > 50) {
 			this.#highlight.clear();
-			this.#highlight.highlight(el);
+			if (el) {
+				this.#highlight.highlight(el);
+			}
 			return;
 		}
 
 		this.#highlight.clear();
-		for (const axId of info.Instances) {
+		for (const axId of info.Highlights) {
 			const el = this.#getNodeByAXID(axId);
 			if (el === null) {
 				console.warn(axId, "does not exist!");
@@ -415,11 +427,12 @@ window.addEventListener("mousemove", (e) => {
 		parent = parent.parentNode;
 	}
 
+	console.log("lookup", id);
 	getStructInfo(id)
 		.then((info) => {
+			console.log(info);
 			inspect.show(el, info);
 			state = info;
-			console.log(info);
 		})
 		.catch((err) => {
 			inspect.showError(el, String(err));
@@ -434,14 +447,13 @@ window.addEventListener("keydown", (e) => {
 	}
 });
 
-// TODO: complete
 Object.defineProperty(window, "__ax_inspector_updateTree", {
 	value:
 		/**
 		 * @param {InfoStruct[]} infos
 		 */
 		(infos) => {
-			inspect.updateTree(infos ?? []);
+			inspect.updateTree(infos);
 		},
 	enumerable: false,
 	writable: false,

@@ -4,7 +4,12 @@ import (
 	"ax-distiller/internal/chrome/axstream"
 	"ax-distiller/internal/chrome/cdp"
 	"ax-distiller/internal/structure"
+	"ax-distiller/internal/structure/stdb"
+	"context"
+	"database/sql"
+	"encoding/binary"
 	"fmt"
+	"log"
 	"log/slog"
 	"sync"
 
@@ -35,42 +40,73 @@ var jsController = fmt.Sprintf(`() => {
 )
 
 type NodeInfo struct {
-	Parent *string
-	ID     string
+	Parent *int64
+	ID     int64
+	AxID   *string
+	Role   string
 	// we return hashes as string representation because JS
 	// unfortunately cannot store a full uint64 with number type
-	Role          string
 	StructureHash string
 	PathHash      string
-	Instances     []proto.AccessibilityAXNodeID
+	Instances     int
+	Highlights    []string
 	Children      []string
 }
 
-func NewNodeInfo(
-	persistent *structure.Persistent,
-	st *structure.StructureInstance,
-) NodeInfo {
-	retrievedInst := persistent.InstancesByStructHash(st.Hash)
-	instances := make([]proto.AccessibilityAXNodeID, len(retrievedInst))
-	for i, r := range retrievedInst {
-		instances[i] = r.Underlying.Underlying.NodeID
+func GetNodeInfo(ctx context.Context, stdbqry *stdb.Queries, id int64) (info NodeInfo, err error) {
+	st, err := stdbqry.GetStruct(ctx, id)
+	if err != nil {
+		err = fmt.Errorf("get struct: %w", err)
+		return
 	}
-	var children []string
-	for child := st.FirstChild; child != nil; child = child.NextSibling {
-		children = append(children, string(child.Underlying.Underlying.NodeID))
-	}
-	info := NodeInfo{
+
+	info = NodeInfo{
 		ID:            string(st.Underlying.Underlying.NodeID),
 		Role:          st.Underlying.Underlying.Role.Value,
 		StructureHash: fmt.Sprint(st.Hash),
 		PathHash:      fmt.Sprint(st.PathHash),
-		Instances:     instances,
-		Children:      children,
+		Highlights:    []string{},
+		Children:      []string{},
 	}
+
+	instances, err := stdbqry.ListStructInstBySHash(ctx, binary.BigEndian.AppendUint64(nil, st.Hash))
+	if err != nil {
+		err = fmt.Errorf("list instances by shash: %w", err)
+		return
+	}
+
+	info.Instances = len(instances)
+
+	for child := st.FirstChild; child != nil; child = child.NextSibling {
+		info.Children = append(info.Children, string(child.Underlying.Underlying.NodeID))
+	}
+
+	switch st.Underlying.Underlying.Role.Value {
+	case structure.ROLE_SYNTHETIC_LIST, structure.ROLE_SYNTHETIC_OBJECT:
+		log.Println("-----------------")
+		for _, h := range instances {
+			log.Println("highlight", h)
+			for child := h.FirstChild; child != nil; child = child.NextSibling {
+				info.Highlights = append(info.Highlights, string(child.Underlying.Underlying.NodeID))
+			}
+		}
+	default:
+		// if regular structure, we highlight all of its instances
+		info.Highlights = make([]string, len(instances))
+		for i, h := range instances {
+			if !h.AxID.Valid {
+				err = fmt.Errorf("axid should always be defined on concrete structure instance: %w", err)
+				return
+			}
+			info.Highlights[i] = h.AxID.String
+		}
+	}
+
 	if st.Parent != nil {
 		info.Parent = new(string(st.Parent.Underlying.Underlying.NodeID))
 	}
-	return info
+
+	return
 }
 
 func expandLevels(
@@ -110,9 +146,12 @@ func expandTo(
 func initPageJS(
 	page *rod.Page,
 	logger *slog.Logger,
+	stdbDriver *sql.DB,
 	persistent *structure.Persistent,
 	persistLock *sync.Mutex,
 ) (err error) {
+	stdbqry := stdb.New(stdbDriver)
+
 	// (this is a tuple)
 	// type Args = [axId: string, levels: number]
 	// if axId == "", it will return root
@@ -124,7 +163,7 @@ func initPageJS(
 		levels := j.Get("1").Int()
 
 		var instance *structure.StructureInstance
-		var infos []NodeInfo
+		infos := []NodeInfo{}
 
 		if axId != "" {
 			instance = persistent.InstanceForAXID(proto.AccessibilityAXNodeID(axId))
@@ -145,8 +184,9 @@ func initPageJS(
 		persistLock.Lock()
 		defer persistLock.Unlock()
 
-		axId := j.Str()
-		var infos []NodeInfo
+		id := j.Int()
+		infos := []NodeInfo{}
+
 		instance := persistent.InstanceForAXID(proto.AccessibilityAXNodeID(axId))
 		expandTo(persistent, instance, &infos)
 
@@ -204,7 +244,8 @@ func updateInspectorTree(
 	persistLock.Lock()
 	defer persistLock.Unlock()
 
-	var infos []NodeInfo
+	// must init empty slice because otherwise will return null
+	infos := []NodeInfo{}
 	for _, updated := range event.Updated {
 		st := persistent.InstanceForAXID(updated.Underlying.NodeID)
 		expandLevels(persistent, st, &infos, 0, -1)

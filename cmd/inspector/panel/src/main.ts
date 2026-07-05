@@ -4,10 +4,13 @@ import { Document, html } from "foldkit/html";
 import { m } from "foldkit/message";
 
 import { Button } from "@foldkit/ui";
+import * as types from "./types";
 
 // MODEL
 
-export const Model = S.Struct({ count: S.Number });
+export const Model = S.Struct({
+  nodes: S.HashMap(S.BigInt, types.StructInfo),
+});
 export type Model = typeof Model.Type;
 
 // MESSAGE
