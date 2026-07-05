@@ -11,32 +11,195 @@ import type { Message } from "@bufbuild/protobuf";
 export declare const file_inspector_v1_inspector: GenFile;
 
 /**
- * @generated from message Foo
+ * @generated from message StructInfo
  */
-export declare type Foo = Message<"Foo"> & {
+export declare type StructInfo = Message<"StructInfo"> & {
   /**
-   * @generated from field: int64 bar = 1;
+   * @generated from field: int64 id = 1;
    */
-  bar: bigint;
+  id: bigint;
+
+  /**
+   * @generated from field: optional int64 parent = 2;
+   */
+  parent?: bigint;
+
+  /**
+   * @generated from field: optional string ax_id = 3;
+   */
+  axId?: string;
+
+  /**
+   * @generated from field: string role = 4;
+   */
+  role: string;
+
+  /**
+   * @generated from field: uint64 structure_hash = 5;
+   */
+  structureHash: bigint;
+
+  /**
+   * @generated from field: uint64 path_hash = 6;
+   */
+  pathHash: bigint;
+
+  /**
+   * @generated from field: int32 instances = 7;
+   */
+  instances: number;
+
+  /**
+   * @generated from field: repeated int64 highlight = 8;
+   */
+  highlight: bigint[];
+
+  /**
+   * @generated from field: repeated int64 children = 9;
+   */
+  children: bigint[];
 };
 
 /**
- * Describes the message Foo.
- * Use `create(FooSchema)` to create a new message.
+ * Describes the message StructInfo.
+ * Use `create(StructInfoSchema)` to create a new message.
  */
-export declare const FooSchema: GenMessage<Foo>;
+export declare const StructInfoSchema: GenMessage<StructInfo>;
 
 /**
- * @generated from service FooServe
+ * GetStruct
+ *
+ * @generated from message GetStructRequest
  */
-export declare const FooServe: GenService<{
+export declare type GetStructRequest = Message<"GetStructRequest"> & {
   /**
-   * @generated from rpc FooServe.Transform
+   * @generated from field: int64 id = 1;
    */
-  transform: {
+  id: bigint;
+};
+
+/**
+ * Describes the message GetStructRequest.
+ * Use `create(GetStructRequestSchema)` to create a new message.
+ */
+export declare const GetStructRequestSchema: GenMessage<GetStructRequest>;
+
+/**
+ * @generated from message GetStructResponse
+ */
+export declare type GetStructResponse = Message<"GetStructResponse"> & {
+  /**
+   * @generated from field: StructInfo info = 1;
+   */
+  info?: StructInfo;
+};
+
+/**
+ * Describes the message GetStructResponse.
+ * Use `create(GetStructResponseSchema)` to create a new message.
+ */
+export declare const GetStructResponseSchema: GenMessage<GetStructResponse>;
+
+/**
+ * Show
+ *
+ * @generated from message ShowRequest
+ */
+export declare type ShowRequest = Message<"ShowRequest"> & {
+  /**
+   * @generated from field: int64 id = 1;
+   */
+  id: bigint;
+};
+
+/**
+ * Describes the message ShowRequest.
+ * Use `create(ShowRequestSchema)` to create a new message.
+ */
+export declare const ShowRequestSchema: GenMessage<ShowRequest>;
+
+/**
+ * @generated from message ShowResponse
+ */
+export declare type ShowResponse = Message<"ShowResponse"> & {
+  /**
+   * @generated from field: repeated StructInfo new_nodes = 1;
+   */
+  newNodes: StructInfo[];
+};
+
+/**
+ * Describes the message ShowResponse.
+ * Use `create(ShowResponseSchema)` to create a new message.
+ */
+export declare const ShowResponseSchema: GenMessage<ShowResponse>;
+
+/**
+ * Expand
+ *
+ * @generated from message ExpandRequest
+ */
+export declare type ExpandRequest = Message<"ExpandRequest"> & {
+  /**
+   * @generated from field: optional int64 target_id = 1;
+   */
+  targetId?: bigint;
+
+  /**
+   * @generated from field: int32 levels = 2;
+   */
+  levels: number;
+};
+
+/**
+ * Describes the message ExpandRequest.
+ * Use `create(ExpandRequestSchema)` to create a new message.
+ */
+export declare const ExpandRequestSchema: GenMessage<ExpandRequest>;
+
+/**
+ * @generated from message ExpandResponse
+ */
+export declare type ExpandResponse = Message<"ExpandResponse"> & {
+  /**
+   * @generated from field: repeated StructInfo new_nodes = 1;
+   */
+  newNodes: StructInfo[];
+};
+
+/**
+ * Describes the message ExpandResponse.
+ * Use `create(ExpandResponseSchema)` to create a new message.
+ */
+export declare const ExpandResponseSchema: GenMessage<ExpandResponse>;
+
+/**
+ * @generated from service Inspector
+ */
+export declare const Inspector: GenService<{
+  /**
+   * @generated from rpc Inspector.GetStruct
+   */
+  getStruct: {
     methodKind: "unary";
-    input: typeof FooSchema;
-    output: typeof FooSchema;
+    input: typeof GetStructRequestSchema;
+    output: typeof GetStructResponseSchema;
+  },
+  /**
+   * @generated from rpc Inspector.Show
+   */
+  show: {
+    methodKind: "unary";
+    input: typeof ShowRequestSchema;
+    output: typeof ShowResponseSchema;
+  },
+  /**
+   * @generated from rpc Inspector.Expand
+   */
+  expand: {
+    methodKind: "unary";
+    input: typeof ExpandRequestSchema;
+    output: typeof ExpandResponseSchema;
   },
 }>;
 

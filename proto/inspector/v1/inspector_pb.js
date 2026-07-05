@@ -8,18 +8,60 @@ import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2
  * Describes the file inspector/v1/inspector.proto.
  */
 export const file_inspector_v1_inspector = /*@__PURE__*/
-  fileDesc("ChxpbnNwZWN0b3IvdjEvaW5zcGVjdG9yLnByb3RvIhIKA0ZvbxILCgNiYXIYASABKAMyIwoIRm9vU2VydmUSFwoJVHJhbnNmb3JtEgQuRm9vGgQuRm9vQjNCDkluc3BlY3RvclByb3RvUAFaH2F4LWRpc3RpbGxlci9wcm90by9pbnNwZWN0b3IvdjFiBnByb3RvMw");
+  fileDesc("ChxpbnNwZWN0b3IvdjEvaW5zcGVjdG9yLnByb3RvIscBCgpTdHJ1Y3RJbmZvEgoKAmlkGAEgASgDEhMKBnBhcmVudBgCIAEoA0gAiAEBEhIKBWF4X2lkGAMgASgJSAGIAQESDAoEcm9sZRgEIAEoCRIWCg5zdHJ1Y3R1cmVfaGFzaBgFIAEoBBIRCglwYXRoX2hhc2gYBiABKAQSEQoJaW5zdGFuY2VzGAcgASgFEhEKCWhpZ2hsaWdodBgIIAMoAxIQCghjaGlsZHJlbhgJIAMoA0IJCgdfcGFyZW50QggKBl9heF9pZCIeChBHZXRTdHJ1Y3RSZXF1ZXN0EgoKAmlkGAEgASgDIi4KEUdldFN0cnVjdFJlc3BvbnNlEhkKBGluZm8YASABKAsyCy5TdHJ1Y3RJbmZvIhkKC1Nob3dSZXF1ZXN0EgoKAmlkGAEgASgDIi4KDFNob3dSZXNwb25zZRIeCgluZXdfbm9kZXMYASADKAsyCy5TdHJ1Y3RJbmZvIkUKDUV4cGFuZFJlcXVlc3QSFgoJdGFyZ2V0X2lkGAEgASgDSACIAQESDgoGbGV2ZWxzGAIgASgFQgwKCl90YXJnZXRfaWQiMAoORXhwYW5kUmVzcG9uc2USHgoJbmV3X25vZGVzGAEgAygLMgsuU3RydWN0SW5mbzKPAQoJSW5zcGVjdG9yEjIKCUdldFN0cnVjdBIRLkdldFN0cnVjdFJlcXVlc3QaEi5HZXRTdHJ1Y3RSZXNwb25zZRIjCgRTaG93EgwuU2hvd1JlcXVlc3QaDS5TaG93UmVzcG9uc2USKQoGRXhwYW5kEg4uRXhwYW5kUmVxdWVzdBoPLkV4cGFuZFJlc3BvbnNlQjNCDkluc3BlY3RvclByb3RvUAFaH2F4LWRpc3RpbGxlci9wcm90by9pbnNwZWN0b3IvdjFiBnByb3RvMw");
 
 /**
- * Describes the message Foo.
- * Use `create(FooSchema)` to create a new message.
+ * Describes the message StructInfo.
+ * Use `create(StructInfoSchema)` to create a new message.
  */
-export const FooSchema = /*@__PURE__*/
+export const StructInfoSchema = /*@__PURE__*/
   messageDesc(file_inspector_v1_inspector, 0);
 
 /**
- * @generated from service FooServe
+ * Describes the message GetStructRequest.
+ * Use `create(GetStructRequestSchema)` to create a new message.
  */
-export const FooServe = /*@__PURE__*/
+export const GetStructRequestSchema = /*@__PURE__*/
+  messageDesc(file_inspector_v1_inspector, 1);
+
+/**
+ * Describes the message GetStructResponse.
+ * Use `create(GetStructResponseSchema)` to create a new message.
+ */
+export const GetStructResponseSchema = /*@__PURE__*/
+  messageDesc(file_inspector_v1_inspector, 2);
+
+/**
+ * Describes the message ShowRequest.
+ * Use `create(ShowRequestSchema)` to create a new message.
+ */
+export const ShowRequestSchema = /*@__PURE__*/
+  messageDesc(file_inspector_v1_inspector, 3);
+
+/**
+ * Describes the message ShowResponse.
+ * Use `create(ShowResponseSchema)` to create a new message.
+ */
+export const ShowResponseSchema = /*@__PURE__*/
+  messageDesc(file_inspector_v1_inspector, 4);
+
+/**
+ * Describes the message ExpandRequest.
+ * Use `create(ExpandRequestSchema)` to create a new message.
+ */
+export const ExpandRequestSchema = /*@__PURE__*/
+  messageDesc(file_inspector_v1_inspector, 5);
+
+/**
+ * Describes the message ExpandResponse.
+ * Use `create(ExpandResponseSchema)` to create a new message.
+ */
+export const ExpandResponseSchema = /*@__PURE__*/
+  messageDesc(file_inspector_v1_inspector, 6);
+
+/**
+ * @generated from service Inspector
+ */
+export const Inspector = /*@__PURE__*/
   serviceDesc(file_inspector_v1_inspector, 0);
 

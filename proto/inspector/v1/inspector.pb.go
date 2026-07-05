@@ -21,27 +21,35 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type Foo struct {
+type StructInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Bar           int64                  `protobuf:"varint,1,opt,name=bar,proto3" json:"bar,omitempty"`
+	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Parent        *int64                 `protobuf:"varint,2,opt,name=parent,proto3,oneof" json:"parent,omitempty"`
+	AxId          *string                `protobuf:"bytes,3,opt,name=ax_id,json=axId,proto3,oneof" json:"ax_id,omitempty"`
+	Role          string                 `protobuf:"bytes,4,opt,name=role,proto3" json:"role,omitempty"`
+	StructureHash uint64                 `protobuf:"varint,5,opt,name=structure_hash,json=structureHash,proto3" json:"structure_hash,omitempty"`
+	PathHash      uint64                 `protobuf:"varint,6,opt,name=path_hash,json=pathHash,proto3" json:"path_hash,omitempty"`
+	Instances     int32                  `protobuf:"varint,7,opt,name=instances,proto3" json:"instances,omitempty"`
+	Highlight     []int64                `protobuf:"varint,8,rep,packed,name=highlight,proto3" json:"highlight,omitempty"`
+	Children      []int64                `protobuf:"varint,9,rep,packed,name=children,proto3" json:"children,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *Foo) Reset() {
-	*x = Foo{}
+func (x *StructInfo) Reset() {
+	*x = StructInfo{}
 	mi := &file_inspector_v1_inspector_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *Foo) String() string {
+func (x *StructInfo) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*Foo) ProtoMessage() {}
+func (*StructInfo) ProtoMessage() {}
 
-func (x *Foo) ProtoReflect() protoreflect.Message {
+func (x *StructInfo) ProtoReflect() protoreflect.Message {
 	mi := &file_inspector_v1_inspector_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -53,27 +61,386 @@ func (x *Foo) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Foo.ProtoReflect.Descriptor instead.
-func (*Foo) Descriptor() ([]byte, []int) {
+// Deprecated: Use StructInfo.ProtoReflect.Descriptor instead.
+func (*StructInfo) Descriptor() ([]byte, []int) {
 	return file_inspector_v1_inspector_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *Foo) GetBar() int64 {
+func (x *StructInfo) GetId() int64 {
 	if x != nil {
-		return x.Bar
+		return x.Id
 	}
 	return 0
+}
+
+func (x *StructInfo) GetParent() int64 {
+	if x != nil && x.Parent != nil {
+		return *x.Parent
+	}
+	return 0
+}
+
+func (x *StructInfo) GetAxId() string {
+	if x != nil && x.AxId != nil {
+		return *x.AxId
+	}
+	return ""
+}
+
+func (x *StructInfo) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *StructInfo) GetStructureHash() uint64 {
+	if x != nil {
+		return x.StructureHash
+	}
+	return 0
+}
+
+func (x *StructInfo) GetPathHash() uint64 {
+	if x != nil {
+		return x.PathHash
+	}
+	return 0
+}
+
+func (x *StructInfo) GetInstances() int32 {
+	if x != nil {
+		return x.Instances
+	}
+	return 0
+}
+
+func (x *StructInfo) GetHighlight() []int64 {
+	if x != nil {
+		return x.Highlight
+	}
+	return nil
+}
+
+func (x *StructInfo) GetChildren() []int64 {
+	if x != nil {
+		return x.Children
+	}
+	return nil
+}
+
+// GetStruct
+type GetStructRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetStructRequest) Reset() {
+	*x = GetStructRequest{}
+	mi := &file_inspector_v1_inspector_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetStructRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetStructRequest) ProtoMessage() {}
+
+func (x *GetStructRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_inspector_v1_inspector_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetStructRequest.ProtoReflect.Descriptor instead.
+func (*GetStructRequest) Descriptor() ([]byte, []int) {
+	return file_inspector_v1_inspector_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *GetStructRequest) GetId() int64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+type GetStructResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Info          *StructInfo            `protobuf:"bytes,1,opt,name=info,proto3" json:"info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetStructResponse) Reset() {
+	*x = GetStructResponse{}
+	mi := &file_inspector_v1_inspector_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetStructResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetStructResponse) ProtoMessage() {}
+
+func (x *GetStructResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_inspector_v1_inspector_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetStructResponse.ProtoReflect.Descriptor instead.
+func (*GetStructResponse) Descriptor() ([]byte, []int) {
+	return file_inspector_v1_inspector_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *GetStructResponse) GetInfo() *StructInfo {
+	if x != nil {
+		return x.Info
+	}
+	return nil
+}
+
+// Show
+type ShowRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShowRequest) Reset() {
+	*x = ShowRequest{}
+	mi := &file_inspector_v1_inspector_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShowRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShowRequest) ProtoMessage() {}
+
+func (x *ShowRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_inspector_v1_inspector_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShowRequest.ProtoReflect.Descriptor instead.
+func (*ShowRequest) Descriptor() ([]byte, []int) {
+	return file_inspector_v1_inspector_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ShowRequest) GetId() int64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+type ShowResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NewNodes      []*StructInfo          `protobuf:"bytes,1,rep,name=new_nodes,json=newNodes,proto3" json:"new_nodes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShowResponse) Reset() {
+	*x = ShowResponse{}
+	mi := &file_inspector_v1_inspector_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShowResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShowResponse) ProtoMessage() {}
+
+func (x *ShowResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_inspector_v1_inspector_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShowResponse.ProtoReflect.Descriptor instead.
+func (*ShowResponse) Descriptor() ([]byte, []int) {
+	return file_inspector_v1_inspector_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ShowResponse) GetNewNodes() []*StructInfo {
+	if x != nil {
+		return x.NewNodes
+	}
+	return nil
+}
+
+// Expand
+type ExpandRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TargetId      *int64                 `protobuf:"varint,1,opt,name=target_id,json=targetId,proto3,oneof" json:"target_id,omitempty"`
+	Levels        int32                  `protobuf:"varint,2,opt,name=levels,proto3" json:"levels,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExpandRequest) Reset() {
+	*x = ExpandRequest{}
+	mi := &file_inspector_v1_inspector_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExpandRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExpandRequest) ProtoMessage() {}
+
+func (x *ExpandRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_inspector_v1_inspector_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExpandRequest.ProtoReflect.Descriptor instead.
+func (*ExpandRequest) Descriptor() ([]byte, []int) {
+	return file_inspector_v1_inspector_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ExpandRequest) GetTargetId() int64 {
+	if x != nil && x.TargetId != nil {
+		return *x.TargetId
+	}
+	return 0
+}
+
+func (x *ExpandRequest) GetLevels() int32 {
+	if x != nil {
+		return x.Levels
+	}
+	return 0
+}
+
+type ExpandResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NewNodes      []*StructInfo          `protobuf:"bytes,1,rep,name=new_nodes,json=newNodes,proto3" json:"new_nodes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExpandResponse) Reset() {
+	*x = ExpandResponse{}
+	mi := &file_inspector_v1_inspector_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExpandResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExpandResponse) ProtoMessage() {}
+
+func (x *ExpandResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_inspector_v1_inspector_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExpandResponse.ProtoReflect.Descriptor instead.
+func (*ExpandResponse) Descriptor() ([]byte, []int) {
+	return file_inspector_v1_inspector_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ExpandResponse) GetNewNodes() []*StructInfo {
+	if x != nil {
+		return x.NewNodes
+	}
+	return nil
 }
 
 var File_inspector_v1_inspector_proto protoreflect.FileDescriptor
 
 const file_inspector_v1_inspector_proto_rawDesc = "" +
 	"\n" +
-	"\x1cinspector/v1/inspector.proto\"\x17\n" +
-	"\x03Foo\x12\x10\n" +
-	"\x03bar\x18\x01 \x01(\x03R\x03bar2#\n" +
-	"\bFooServe\x12\x17\n" +
-	"\tTransform\x12\x04.Foo\x1a\x04.FooB3B\x0eInspectorProtoP\x01Z\x1fax-distiller/proto/inspector/v1b\x06proto3"
+	"\x1cinspector/v1/inspector.proto\"\x98\x02\n" +
+	"\n" +
+	"StructInfo\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x1b\n" +
+	"\x06parent\x18\x02 \x01(\x03H\x00R\x06parent\x88\x01\x01\x12\x18\n" +
+	"\x05ax_id\x18\x03 \x01(\tH\x01R\x04axId\x88\x01\x01\x12\x12\n" +
+	"\x04role\x18\x04 \x01(\tR\x04role\x12%\n" +
+	"\x0estructure_hash\x18\x05 \x01(\x04R\rstructureHash\x12\x1b\n" +
+	"\tpath_hash\x18\x06 \x01(\x04R\bpathHash\x12\x1c\n" +
+	"\tinstances\x18\a \x01(\x05R\tinstances\x12\x1c\n" +
+	"\thighlight\x18\b \x03(\x03R\thighlight\x12\x1a\n" +
+	"\bchildren\x18\t \x03(\x03R\bchildrenB\t\n" +
+	"\a_parentB\b\n" +
+	"\x06_ax_id\"\"\n" +
+	"\x10GetStructRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02id\"4\n" +
+	"\x11GetStructResponse\x12\x1f\n" +
+	"\x04info\x18\x01 \x01(\v2\v.StructInfoR\x04info\"\x1d\n" +
+	"\vShowRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02id\"8\n" +
+	"\fShowResponse\x12(\n" +
+	"\tnew_nodes\x18\x01 \x03(\v2\v.StructInfoR\bnewNodes\"W\n" +
+	"\rExpandRequest\x12 \n" +
+	"\ttarget_id\x18\x01 \x01(\x03H\x00R\btargetId\x88\x01\x01\x12\x16\n" +
+	"\x06levels\x18\x02 \x01(\x05R\x06levelsB\f\n" +
+	"\n" +
+	"_target_id\":\n" +
+	"\x0eExpandResponse\x12(\n" +
+	"\tnew_nodes\x18\x01 \x03(\v2\v.StructInfoR\bnewNodes2\x8f\x01\n" +
+	"\tInspector\x122\n" +
+	"\tGetStruct\x12\x11.GetStructRequest\x1a\x12.GetStructResponse\x12#\n" +
+	"\x04Show\x12\f.ShowRequest\x1a\r.ShowResponse\x12)\n" +
+	"\x06Expand\x12\x0e.ExpandRequest\x1a\x0f.ExpandResponseB3B\x0eInspectorProtoP\x01Z\x1fax-distiller/proto/inspector/v1b\x06proto3"
 
 var (
 	file_inspector_v1_inspector_proto_rawDescOnce sync.Once
@@ -87,18 +454,31 @@ func file_inspector_v1_inspector_proto_rawDescGZIP() []byte {
 	return file_inspector_v1_inspector_proto_rawDescData
 }
 
-var file_inspector_v1_inspector_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_inspector_v1_inspector_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_inspector_v1_inspector_proto_goTypes = []any{
-	(*Foo)(nil), // 0: Foo
+	(*StructInfo)(nil),        // 0: StructInfo
+	(*GetStructRequest)(nil),  // 1: GetStructRequest
+	(*GetStructResponse)(nil), // 2: GetStructResponse
+	(*ShowRequest)(nil),       // 3: ShowRequest
+	(*ShowResponse)(nil),      // 4: ShowResponse
+	(*ExpandRequest)(nil),     // 5: ExpandRequest
+	(*ExpandResponse)(nil),    // 6: ExpandResponse
 }
 var file_inspector_v1_inspector_proto_depIdxs = []int32{
-	0, // 0: FooServe.Transform:input_type -> Foo
-	0, // 1: FooServe.Transform:output_type -> Foo
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	0, // 0: GetStructResponse.info:type_name -> StructInfo
+	0, // 1: ShowResponse.new_nodes:type_name -> StructInfo
+	0, // 2: ExpandResponse.new_nodes:type_name -> StructInfo
+	1, // 3: Inspector.GetStruct:input_type -> GetStructRequest
+	3, // 4: Inspector.Show:input_type -> ShowRequest
+	5, // 5: Inspector.Expand:input_type -> ExpandRequest
+	2, // 6: Inspector.GetStruct:output_type -> GetStructResponse
+	4, // 7: Inspector.Show:output_type -> ShowResponse
+	6, // 8: Inspector.Expand:output_type -> ExpandResponse
+	6, // [6:9] is the sub-list for method output_type
+	3, // [3:6] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_inspector_v1_inspector_proto_init() }
@@ -106,13 +486,15 @@ func file_inspector_v1_inspector_proto_init() {
 	if File_inspector_v1_inspector_proto != nil {
 		return
 	}
+	file_inspector_v1_inspector_proto_msgTypes[0].OneofWrappers = []any{}
+	file_inspector_v1_inspector_proto_msgTypes[5].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_inspector_v1_inspector_proto_rawDesc), len(file_inspector_v1_inspector_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   1,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

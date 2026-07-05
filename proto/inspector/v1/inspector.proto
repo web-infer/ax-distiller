@@ -1,9 +1,45 @@
 syntax = "proto3";
 
-message Foo {
-  int64 bar = 1;
+message StructInfo {
+  int64 id = 1;
+  optional int64 parent = 2;
+  optional string ax_id = 3;
+  string role = 4;
+  uint64 structure_hash = 5;
+  uint64 path_hash = 6;
+  int32 instances = 7;
+  repeated int64 highlight = 8;
+  repeated int64 children = 9;
 }
 
-service FooServe {
-  rpc Transform(Foo) returns (Foo);
+// GetStruct
+message GetStructRequest {
+  int64 id = 1;
 }
+message GetStructResponse {
+  StructInfo info = 1;
+}
+
+// Show
+message ShowRequest {
+  int64 id = 1;
+}
+message ShowResponse {
+  repeated StructInfo new_nodes = 1;
+}
+
+// Expand
+message ExpandRequest {
+  optional int64 target_id = 1;
+  int32 levels = 2;
+}
+message ExpandResponse {
+  repeated StructInfo new_nodes = 1;
+}
+
+service Inspector {
+  rpc GetStruct(GetStructRequest) returns (GetStructResponse);
+  rpc Show(ShowRequest) returns (ShowResponse);
+  rpc Expand(ExpandRequest) returns (ExpandResponse);
+}
+

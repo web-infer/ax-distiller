@@ -21,8 +21,8 @@ import (
 const _ = connect.IsAtLeastVersion1_13_0
 
 const (
-	// FooServeName is the fully-qualified name of the FooServe service.
-	FooServeName = "FooServe"
+	// InspectorName is the fully-qualified name of the Inspector service.
+	InspectorName = "Inspector"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -33,76 +33,132 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
-	// FooServeTransformProcedure is the fully-qualified name of the FooServe's Transform RPC.
-	FooServeTransformProcedure = "/FooServe/Transform"
+	// InspectorGetStructProcedure is the fully-qualified name of the Inspector's GetStruct RPC.
+	InspectorGetStructProcedure = "/Inspector/GetStruct"
+	// InspectorShowProcedure is the fully-qualified name of the Inspector's Show RPC.
+	InspectorShowProcedure = "/Inspector/Show"
+	// InspectorExpandProcedure is the fully-qualified name of the Inspector's Expand RPC.
+	InspectorExpandProcedure = "/Inspector/Expand"
 )
 
-// FooServeClient is a client for the FooServe service.
-type FooServeClient interface {
-	Transform(context.Context, *connect.Request[v1.Foo]) (*connect.Response[v1.Foo], error)
+// InspectorClient is a client for the Inspector service.
+type InspectorClient interface {
+	GetStruct(context.Context, *connect.Request[v1.GetStructRequest]) (*connect.Response[v1.GetStructResponse], error)
+	Show(context.Context, *connect.Request[v1.ShowRequest]) (*connect.Response[v1.ShowResponse], error)
+	Expand(context.Context, *connect.Request[v1.ExpandRequest]) (*connect.Response[v1.ExpandResponse], error)
 }
 
-// NewFooServeClient constructs a client for the FooServe service. By default, it uses the Connect
+// NewInspectorClient constructs a client for the Inspector service. By default, it uses the Connect
 // protocol with the binary Protobuf Codec, asks for gzipped responses, and sends uncompressed
 // requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or
 // connect.WithGRPCWeb() options.
 //
 // The URL supplied here should be the base URL for the Connect or gRPC server (for example,
 // http://api.acme.com or https://acme.com/grpc).
-func NewFooServeClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) FooServeClient {
+func NewInspectorClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) InspectorClient {
 	baseURL = strings.TrimRight(baseURL, "/")
-	fooServeMethods := v1.File_inspector_v1_inspector_proto.Services().ByName("FooServe").Methods()
-	return &fooServeClient{
-		transform: connect.NewClient[v1.Foo, v1.Foo](
+	inspectorMethods := v1.File_inspector_v1_inspector_proto.Services().ByName("Inspector").Methods()
+	return &inspectorClient{
+		getStruct: connect.NewClient[v1.GetStructRequest, v1.GetStructResponse](
 			httpClient,
-			baseURL+FooServeTransformProcedure,
-			connect.WithSchema(fooServeMethods.ByName("Transform")),
+			baseURL+InspectorGetStructProcedure,
+			connect.WithSchema(inspectorMethods.ByName("GetStruct")),
+			connect.WithClientOptions(opts...),
+		),
+		show: connect.NewClient[v1.ShowRequest, v1.ShowResponse](
+			httpClient,
+			baseURL+InspectorShowProcedure,
+			connect.WithSchema(inspectorMethods.ByName("Show")),
+			connect.WithClientOptions(opts...),
+		),
+		expand: connect.NewClient[v1.ExpandRequest, v1.ExpandResponse](
+			httpClient,
+			baseURL+InspectorExpandProcedure,
+			connect.WithSchema(inspectorMethods.ByName("Expand")),
 			connect.WithClientOptions(opts...),
 		),
 	}
 }
 
-// fooServeClient implements FooServeClient.
-type fooServeClient struct {
-	transform *connect.Client[v1.Foo, v1.Foo]
+// inspectorClient implements InspectorClient.
+type inspectorClient struct {
+	getStruct *connect.Client[v1.GetStructRequest, v1.GetStructResponse]
+	show      *connect.Client[v1.ShowRequest, v1.ShowResponse]
+	expand    *connect.Client[v1.ExpandRequest, v1.ExpandResponse]
 }
 
-// Transform calls FooServe.Transform.
-func (c *fooServeClient) Transform(ctx context.Context, req *connect.Request[v1.Foo]) (*connect.Response[v1.Foo], error) {
-	return c.transform.CallUnary(ctx, req)
+// GetStruct calls Inspector.GetStruct.
+func (c *inspectorClient) GetStruct(ctx context.Context, req *connect.Request[v1.GetStructRequest]) (*connect.Response[v1.GetStructResponse], error) {
+	return c.getStruct.CallUnary(ctx, req)
 }
 
-// FooServeHandler is an implementation of the FooServe service.
-type FooServeHandler interface {
-	Transform(context.Context, *connect.Request[v1.Foo]) (*connect.Response[v1.Foo], error)
+// Show calls Inspector.Show.
+func (c *inspectorClient) Show(ctx context.Context, req *connect.Request[v1.ShowRequest]) (*connect.Response[v1.ShowResponse], error) {
+	return c.show.CallUnary(ctx, req)
 }
 
-// NewFooServeHandler builds an HTTP handler from the service implementation. It returns the path on
-// which to mount the handler and the handler itself.
+// Expand calls Inspector.Expand.
+func (c *inspectorClient) Expand(ctx context.Context, req *connect.Request[v1.ExpandRequest]) (*connect.Response[v1.ExpandResponse], error) {
+	return c.expand.CallUnary(ctx, req)
+}
+
+// InspectorHandler is an implementation of the Inspector service.
+type InspectorHandler interface {
+	GetStruct(context.Context, *connect.Request[v1.GetStructRequest]) (*connect.Response[v1.GetStructResponse], error)
+	Show(context.Context, *connect.Request[v1.ShowRequest]) (*connect.Response[v1.ShowResponse], error)
+	Expand(context.Context, *connect.Request[v1.ExpandRequest]) (*connect.Response[v1.ExpandResponse], error)
+}
+
+// NewInspectorHandler builds an HTTP handler from the service implementation. It returns the path
+// on which to mount the handler and the handler itself.
 //
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
-func NewFooServeHandler(svc FooServeHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	fooServeMethods := v1.File_inspector_v1_inspector_proto.Services().ByName("FooServe").Methods()
-	fooServeTransformHandler := connect.NewUnaryHandler(
-		FooServeTransformProcedure,
-		svc.Transform,
-		connect.WithSchema(fooServeMethods.ByName("Transform")),
+func NewInspectorHandler(svc InspectorHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	inspectorMethods := v1.File_inspector_v1_inspector_proto.Services().ByName("Inspector").Methods()
+	inspectorGetStructHandler := connect.NewUnaryHandler(
+		InspectorGetStructProcedure,
+		svc.GetStruct,
+		connect.WithSchema(inspectorMethods.ByName("GetStruct")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/FooServe/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	inspectorShowHandler := connect.NewUnaryHandler(
+		InspectorShowProcedure,
+		svc.Show,
+		connect.WithSchema(inspectorMethods.ByName("Show")),
+		connect.WithHandlerOptions(opts...),
+	)
+	inspectorExpandHandler := connect.NewUnaryHandler(
+		InspectorExpandProcedure,
+		svc.Expand,
+		connect.WithSchema(inspectorMethods.ByName("Expand")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/Inspector/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case FooServeTransformProcedure:
-			fooServeTransformHandler.ServeHTTP(w, r)
+		case InspectorGetStructProcedure:
+			inspectorGetStructHandler.ServeHTTP(w, r)
+		case InspectorShowProcedure:
+			inspectorShowHandler.ServeHTTP(w, r)
+		case InspectorExpandProcedure:
+			inspectorExpandHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
 	})
 }
 
-// UnimplementedFooServeHandler returns CodeUnimplemented from all methods.
-type UnimplementedFooServeHandler struct{}
+// UnimplementedInspectorHandler returns CodeUnimplemented from all methods.
+type UnimplementedInspectorHandler struct{}
 
-func (UnimplementedFooServeHandler) Transform(context.Context, *connect.Request[v1.Foo]) (*connect.Response[v1.Foo], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("FooServe.Transform is not implemented"))
+func (UnimplementedInspectorHandler) GetStruct(context.Context, *connect.Request[v1.GetStructRequest]) (*connect.Response[v1.GetStructResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("Inspector.GetStruct is not implemented"))
+}
+
+func (UnimplementedInspectorHandler) Show(context.Context, *connect.Request[v1.ShowRequest]) (*connect.Response[v1.ShowResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("Inspector.Show is not implemented"))
+}
+
+func (UnimplementedInspectorHandler) Expand(context.Context, *connect.Request[v1.ExpandRequest]) (*connect.Response[v1.ExpandResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("Inspector.Expand is not implemented"))
 }
